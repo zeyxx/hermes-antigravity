@@ -11,6 +11,40 @@ try:
 except ImportError:
     from models import get_thinking_config
 
+_THOUGHT_SIGNATURES: dict[str, str] = {}
+
+
+
+class ChoiceDeltaToolCallFunction:
+    def __init__(self, name: str = "", arguments: str = "") -> None:
+        self.name = name
+        self.arguments = arguments
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+class ChoiceDeltaToolCall:
+    def __init__(
+        self,
+        index: int = 0,
+        id: str = "",
+        type: str = "function",
+        function: ChoiceDeltaToolCallFunction | None = None,
+    ) -> None:
+        self.index = index
+        self.id = id
+        self.type = type
+        self.function = function or ChoiceDeltaToolCallFunction()
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
 
 class ChoiceDelta:
     def __init__(
@@ -110,9 +144,8 @@ def to_antigravity_payload(
     contents: list[dict[str, Any]] = []
     system_parts: list[dict[str, str]] = []
 
-    # Map tool_call_id to function name for tool responses
     tool_call_names: dict[str, str] = {}
-
+    unsigned_tool_ids: set[str] = set()
     for msg in messages:
         role = msg.get("role")
         content = msg.get("content")
@@ -123,7 +156,7 @@ def to_antigravity_payload(
             continue
 
         if role == "user":
-            parts: list[dict[str, Any]] = []
+            parts = []
             if isinstance(content, str):
                 parts.append({"text": content})
             elif isinstance(content, list):
@@ -156,35 +189,48 @@ def to_antigravity_payload(
 
                 raw_args = fn.get("arguments", "{}")
                 args_dict = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                parts.append(
-                    {
-                        "functionCall": {
-                            "id": tc_id,
-                            "name": fn_name,
-                            "args": args_dict or {},
-                        }
+
+                sig = _THOUGHT_SIGNATURES.get(tc_id) or _THOUGHT_SIGNATURES.get(fn_name) or _THOUGHT_SIGNATURES.get("__last__")
+                is_gemini_3 = any(m in model for m in ("gemini-3", "gemini-2.5"))
+                if is_gemini_3 and not sig:
+                    unsigned_tool_ids.add(tc_id)
+                    parts.append({"text": f"[Action: invoked {fn_name} with {json.dumps(args_dict)}]"})
+                else:
+                    fc_body: dict[str, Any] = {
+                        "name": fn_name,
+                        "args": args_dict or {},
                     }
-                )
+                    fc_part: dict[str, Any] = {"functionCall": fc_body}
+                    if sig:
+                        fc_part["thoughtSignature"] = sig
+                    parts.append(fc_part)
             contents.append({"role": "model", "parts": parts or [{"text": ""}]})
 
         elif role == "tool":
             tc_id = msg.get("tool_call_id", "")
             fn_name = tool_call_names.get(tc_id, "tool")
             res_content = content if isinstance(content, str) else json.dumps(content)
-            contents.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "functionResponse": {
-                                "name": fn_name,
-                                "response": {"content": res_content},
+            if tc_id in unsigned_tool_ids:
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [{"text": f"[Observation from {fn_name}:\n{res_content}]"}],
+                    }
+                )
+            else:
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": fn_name,
+                                    "response": {"content": res_content},
+                                }
                             }
-                        }
-                    ],
-                }
-            )
-
+                        ],
+                    }
+                )
     request_body: dict[str, Any] = {"contents": contents}
 
     if system_parts:
@@ -267,6 +313,10 @@ def parse_sse_event(json_str: str, model_id: str) -> list[ChatCompletionChunk]:
         tool_calls = None
         is_last = idx == len(parts) - 1
 
+        sig = part.get("thoughtSignature")
+        if sig:
+            _THOUGHT_SIGNATURES["__last__"] = sig
+
         if "text" in part:
             if part.get("thought") is True:
                 reasoning_content = part["text"]
@@ -276,25 +326,29 @@ def parse_sse_event(json_str: str, model_id: str) -> list[ChatCompletionChunk]:
         if "functionCall" in part:
             fc = part["functionCall"]
             tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+            if sig:
+                _THOUGHT_SIGNATURES[tc_id] = sig
+                if fc.get("name"):
+                    _THOUGHT_SIGNATURES[fc["name"]] = sig
             args_str = (
                 json.dumps(fc.get("args", {}))
                 if isinstance(fc.get("args"), dict)
                 else str(fc.get("args", "{}"))
             )
+            fn_obj = ChoiceDeltaToolCallFunction(
+                name=fc.get("name", ""),
+                arguments=args_str,
+            )
             tool_calls = [
-                {
-                    "index": 0,
-                    "id": tc_id,
-                    "type": "function",
-                    "function": {
-                        "name": fc.get("name", ""),
-                        "arguments": args_str,
-                    },
-                }
+                ChoiceDeltaToolCall(
+                    index=0,
+                    id=tc_id,
+                    type="function",
+                    function=fn_obj,
+                )
             ]
             if is_last and not finish_reason:
                 finish_reason = "tool_calls"
-
         if content is not None or reasoning_content is not None or tool_calls is not None:
             delta = ChoiceDelta(
                 content=content,

@@ -2,8 +2,8 @@ import json
 from translator import (
     to_antigravity_payload,
     parse_sse_event,
+    _THOUGHT_SIGNATURES,
 )
-
 
 def test_to_antigravity_payload_messages_and_tools():
     messages = [
@@ -41,6 +41,8 @@ def test_to_antigravity_payload_messages_and_tools():
         }
     ]
 
+    _THOUGHT_SIGNATURES["call_123"] = "dummy_sig_123"
+
     payload = to_antigravity_payload(
         model="gemini-3.8-flash",
         messages=messages,
@@ -70,6 +72,36 @@ def test_to_antigravity_payload_messages_and_tools():
     assert len(req["tools"][0]["functionDeclarations"]) == 1
     assert req["tools"][0]["functionDeclarations"][0]["name"] == "run_shell"
 
+
+def test_unsigned_tool_call_falls_back_to_text_observation():
+    _THOUGHT_SIGNATURES.clear()
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_unsigned",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "foo.txt"}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_unsigned",
+            "content": "file content here",
+        },
+    ]
+    payload = to_antigravity_payload(
+        model="gemini-3.8-flash",
+        messages=messages,
+        project_id="proj-test",
+    )
+    contents = payload["request"]["contents"]
+    assert len(contents) == 2
+    assert "[Action: invoked read_file" in contents[0]["parts"][0]["text"]
+    assert "[Observation from read_file" in contents[1]["parts"][0]["text"]
 
 def test_parse_sse_event_text_and_thinking():
     data = {
