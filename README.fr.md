@@ -154,6 +154,14 @@ pytest tests/ -v
 
 ---
 
+## ⚠️ Avertissement
+
+Ce plugin utilise les endpoints Google Cloud Code Assist (`cloudcode-pa.googleapis.com`) en dehors du client officiel Antigravity CLI. Il ne s'agit **pas** d'une intégration officiellement supportée par Google. L'utilisation de ces endpoints via un client tiers peut ne pas être conforme aux Conditions d'Utilisation de Google et pourrait entraîner des restrictions ou la suspension de votre compte Google. Ces endpoints peuvent également être modifiés ou bloqués par Google à tout moment et sans préavis.
+
+**Utilisation à vos propres risques.** Les auteurs de ce plugin ne sont pas responsables des conséquences liées à son utilisation.
+
+---
+
 ## 🙏 Remerciements & Provenance Open Source
 
 Ce projet s'appuie sur le travail précieux de la communauté open source. L'attribution et la traçabilité du code sont indispensables à la pérennité et à l'éthique de notre écosystème.
