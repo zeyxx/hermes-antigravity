@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.egg-info/
+dist/
+build/
+
+# Credentials and local tokens
+*-auth.json
+*oauth-token*
+credentials*.json
+.env*
+*.db

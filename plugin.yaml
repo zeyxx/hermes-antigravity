@@ -1,0 +1,5 @@
+name: antigravity
+kind: model-provider
+version: 1.0.0
+description: Google Antigravity / Cloud Code Assist inference provider for Hermes Agent
+author: Sovereign Operator

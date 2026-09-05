@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-antigravity"
+version = "1.0.0"
+description = "Google Antigravity / Cloud Code Assist inference provider plugin for Hermes Agent"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "zeyxx" }
+]
+keywords = ["hermes-agent", "antigravity", "gemini", "claude", "inference", "ai-agent"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/zeyxx/hermes-antigravity"
+Repository = "https://github.com/zeyxx/hermes-antigravity"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*"]
