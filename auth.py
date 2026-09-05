@@ -44,9 +44,10 @@ SCOPES = [
 ]
 
 DEFAULT_CACHE_FILE = Path.home() / ".hermes" / "antigravity-auth.json"
-DEFAULT_USER_AGENT = (
-    "antigravity/cli/1.1.23 (aidev_client; os_type=linux; arch=amd64; cl=974125021; auth_method=consumer)"
-)
+try:
+    from .models import DEFAULT_USER_AGENT
+except ImportError:
+    from models import DEFAULT_USER_AGENT
 
 
 def generate_pkce() -> tuple[str, str]:
@@ -255,6 +256,12 @@ class AntigravityAuthManager:
 
         print("\n=== Antigravity Authentication ===")
         print(f"Ouvrez cette URL dans votre navigateur pour vous connecter :\n\n{auth_url}\n")
+
+        import webbrowser
+        try:
+            webbrowser.open(auth_url)
+        except Exception:
+            pass
 
         # Try starting local server
         auth_code = None

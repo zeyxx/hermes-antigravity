@@ -76,11 +76,16 @@ L'architecture est directement inspirée et alignée sur le plugin éprouvé `pi
 ## 📦 Installation & Découverte
 
 Clonez simplement le dépôt dans votre répertoire de plugins Hermes :
+
+**Linux & macOS :**
 ```bash
 git clone https://github.com/zeyxx/hermes-antigravity ~/.hermes/plugins/model-providers/antigravity
 ```
 
-Hermes Agent découvre automatiquement les plugins placés dans `$HERMES_HOME/plugins/model-providers/`. Aucune modification du cœur de Hermes n'est nécessaire.
+**Windows (PowerShell) :**
+```powershell
+git clone https://github.com/zeyxx/hermes-antigravity "$env:USERPROFILE\.hermes\plugins\model-providers\antigravity"
+```
 
 Pour vérifier la détection par Hermes :
 ```bash

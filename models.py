@@ -4,10 +4,23 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def get_user_agent() -> str:
+    """Return authentic Antigravity CLI wire User-Agent matching host OS and arch."""
+    sys_os = platform.system().lower()
+    os_type = "windows" if "win" in sys_os else ("darwin" if "darwin" in sys_os else "linux")
+    machine = platform.machine().lower()
+    arch = "arm64" if ("arm" in machine or "aarch64" in machine) else "amd64"
+    return f"antigravity/cli/1.1.23 (aidev_client; os_type={os_type}; arch={arch}; cl=974125021; auth_method=consumer)"
+
+
+DEFAULT_USER_AGENT = get_user_agent()
 
 FALLBACK_MODELS: tuple[str, ...] = (
     "gemini-3.8-flash",
