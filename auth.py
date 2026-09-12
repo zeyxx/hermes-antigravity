@@ -582,6 +582,37 @@ def _antigravity_remove_source(provider: str, removed) -> Any:
     return result
 
 
+def _register_removal_step() -> bool:
+    """Append our RemovalStep to the core registry without the condemned shim.
+
+    ``agent.credential_sources.register`` is a PLUGIN-COMPAT shim deleted on
+    2026-09-14 (see hermes-agent compat_manifest.json). The ``_REGISTRY``
+    list consumed by ``find_removal_step`` is real code and stays: appending
+    to it directly is exactly what the shim did, so behavior is identical
+    before and after the deadline.
+    """
+    try:
+        from agent import credential_sources as _cs
+        step = _cs.RemovalStep(
+            provider="antigravity",
+            source_id="manual:antigravity_pkce",
+            remove_fn=_antigravity_remove_source,
+            description="antigravity account registry",
+        )
+        registry = getattr(_cs, "_REGISTRY", None)
+        if hasattr(registry, "append"):
+            registry.append(step)
+            return True
+        shim = getattr(_cs, "register", None)
+        if callable(shim):
+            shim(step)
+            return True
+        return False
+    except Exception as exc:
+        logger.debug("Antigravity removal-step registration skipped: %s", exc)
+        return False
+
+
 def register_hermes_auth() -> bool:
     """Register antigravity with hermes auth system.
     
@@ -595,12 +626,11 @@ def register_hermes_auth() -> bool:
     """
     try:
         from hermes_cli import auth_commands as auth_cmd
-        from agent.credential_sources import RemovalStep, register as register_removal
-        
+
         # 1. Register as OAuth-capable provider
         if hasattr(auth_cmd, '_OAUTH_CAPABLE_PROVIDERS'):
             auth_cmd._OAUTH_CAPABLE_PROVIDERS.add("antigravity")
-        
+
         # 2. Register OAuth add spec
         if hasattr(auth_cmd, '_OAUTH_ADD_SPECS') and hasattr(auth_cmd, '_OAuthAddSpec'):
             auth_cmd._OAUTH_ADD_SPECS["antigravity"] = auth_cmd._OAuthAddSpec(
@@ -610,20 +640,17 @@ def register_hermes_auth() -> bool:
                 fields=_antigravity_fields_extractor,
                 activate_first=False,  # Don't auto-switch provider
             )
-        
-        # 3. Register removal step
-        register_removal(RemovalStep(
-            provider="antigravity",
-            source_id="manual:antigravity_pkce",
-            remove_fn=_antigravity_remove_source,
-            description="antigravity account registry",
-        ))
-        
-        logger.debug("Antigravity registered with hermes auth system")
-        return True
     except Exception as exc:
         logger.debug("Could not register antigravity with hermes auth: %s", exc)
         return False
+
+    # 3. Register removal step (independent: add/list/status survive if the
+    #    core removes the credential_sources shim — see _register_removal_step).
+    if _register_removal_step():
+        logger.debug("Antigravity registered with hermes auth system")
+    else:
+        logger.debug("Antigravity auth registered without removal step")
+    return True
 
 
 # ── CLI Interface (fallback) ──────────────────────────────────────

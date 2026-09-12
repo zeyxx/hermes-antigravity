@@ -50,3 +50,11 @@ def test_antigravity_model_flow_hook():
         return
     assert "antigravity" in flows
     assert callable(flows["antigravity"])
+
+
+def test_antigravity_skips_models_health_probe():
+    # Google has no REST /models on this base URL (catalog is
+    # fetchAvailableModels) — the profile must opt out of the probe.
+    profile = get_provider_profile("antigravity")
+    assert profile is not None
+    assert profile.supports_health_check is False

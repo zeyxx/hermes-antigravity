@@ -72,6 +72,9 @@ antigravity = AntigravityProfile(
     # OAuth registry at import). The OAuth truth lives in the overlay,
     # _oauth_auth_type and register_hermes_auth() below.
     auth_type="api_key",
+    # Google exposes no REST /models here (catalog is fetchAvailableModels);
+    # opt out of the core's /models health probe instead of 404ing in doctor.
+    supports_health_check=False,
     supports_vision=True,
     supports_vision_tool_messages=True,
     default_max_tokens=65536,

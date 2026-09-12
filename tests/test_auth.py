@@ -52,3 +52,10 @@ def test_auth_manager_get_valid_token_cached():
     )
     token, proj = manager.get_credentials()
     assert token == "mock-valid-token-789"
+
+
+def test_register_removal_step_returns_bool():
+    from auth import _register_removal_step
+    # Must never raise: True when the core registry accepts the step,
+    # False when the core removed the shim (add/list/status unaffected).
+    assert _register_removal_step() in (True, False)
