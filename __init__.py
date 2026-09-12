@@ -64,7 +64,14 @@ antigravity = AntigravityProfile(
     signup_url="https://antigravity.google/",
     env_vars=("ANTIGRAVITY_ACCESS_TOKEN", "ANTIGRAVITY_API_KEY", "GOOGLE_OAUTH_TOKEN"),
     base_url="https://daily-cloudcode-pa.googleapis.com",
-    auth_type="oauth_external",
+    # NOTE: declared as api_key (not oauth_external) so the core's plugin
+    # bridge (_register_plugin_provider, api_key/external_process only)
+    # admits this profile into PROVIDER_REGISTRY and the CLI credential
+    # gate. This is truthful at the wire layer: the injected credential is
+    # a bearer token from ANTIGRAVITY_ACCESS_TOKEN (populated from the
+    # OAuth registry at import). The OAuth truth lives in the overlay,
+    # _oauth_auth_type and register_hermes_auth() below.
+    auth_type="api_key",
     supports_vision=True,
     supports_vision_tool_messages=True,
     default_max_tokens=65536,
