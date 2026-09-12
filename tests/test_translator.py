@@ -216,3 +216,98 @@ def test_function_response_uses_output_shape():
     fr = payload["request"]["contents"][-1]["parts"][0]["functionResponse"]
     assert fr["response"] == {"output": "42"}
     assert fr["id"] == "call_1"
+
+
+def test_claude_function_call_includes_id():
+    """Claude/GPT-OSS require the id field on functionCall (Google 400s without it)."""
+    _THOUGHT_SIGNATURES.clear()
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "toolu_abc123",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": '{"cmd": "ls"}'},
+                }
+            ],
+        },
+    ]
+    payload = to_antigravity_payload(
+        model="claude-sonnet-4-6",
+        messages=messages,
+        project_id="proj-test",
+    )
+    fc = payload["request"]["contents"][0]["parts"][0]["functionCall"]
+    assert "id" in fc, "Claude functionCall must include id"
+    assert fc["id"] == "toolu_abc123"
+
+
+def test_claude_function_response_includes_id():
+    """Claude/GPT-OSS require the id field on functionResponse."""
+    _THOUGHT_SIGNATURES.clear()
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "toolu_abc123",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": '{"cmd": "ls"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "toolu_abc123", "content": "file.txt"},
+    ]
+    payload = to_antigravity_payload(
+        model="claude-sonnet-4-6",
+        messages=messages,
+        project_id="proj-test",
+    )
+    fr = payload["request"]["contents"][1]["parts"][0]["functionResponse"]
+    assert "id" in fr, "Claude functionResponse must include id"
+    assert fr["id"] == "toolu_abc123"
+
+
+def test_sanitize_schema_strips_unsupported_keywords():
+    """Claude strictly validates tool schemas: anyOf/oneOf/allOf must go (issue #2)."""
+    from translator import _sanitize_schema
+    schema = {
+        "type": "object",
+        "properties": {
+            # Exact shape from the issue: terminal.notify
+            "notify": {"anyOf": [{"type": "boolean"}, {"type": "array", "items": {"type": "string"}}]},
+            "cmd": {"type": "string", "description": "command"},
+            "nested": {"type": "object", "properties": {"x": {"oneOf": [{"type": "string"}]}}},
+        },
+        "required": ["cmd"],
+    }
+    clean = _sanitize_schema(schema)
+    assert "anyOf" not in clean["properties"]["notify"]
+    assert clean["properties"]["cmd"] == {"type": "string", "description": "command"}
+    assert "oneOf" not in clean["properties"]["nested"]["properties"]["x"]
+    assert clean["required"] == ["cmd"]
+    # Lists recurse too
+    assert _sanitize_schema([{"anyOf": [1], "type": "string"}]) == [{"type": "string"}]
+    assert _sanitize_schema("scalar") == "scalar"
+
+
+def test_tool_declaration_schema_is_sanitized():
+    """End-to-end: declared tool parameters carry no anyOf/oneOf."""
+    payload = to_antigravity_payload(
+        model="claude-sonnet-4-6",
+        messages=[{"role": "user", "content": "hi"}],
+        project_id="p",
+        tools=[{"type": "function", "function": {
+            "name": "terminal",
+            "description": "run",
+            "parameters": {"type": "object",
+                           "properties": {"notify": {"anyOf": [{"type": "boolean"}]}},
+                           "allOf": [{"type": "object"}]},
+        }}],
+    )
+    params = payload["request"]["tools"][0]["functionDeclarations"][0]["parameters"]
+    assert "anyOf" not in params["properties"]["notify"]
+    assert "allOf" not in params
