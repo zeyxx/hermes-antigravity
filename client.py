@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
 try:
     from .auth import AntigravityAuthManager
-    from .models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model
+    from .models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model, clamp_max_tokens
     from .translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
 except ImportError:
     from auth import AntigravityAuthManager
-    from models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model
+    from models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model, clamp_max_tokens
     from translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ class AntigravityClient:
             tools=tools,
             tool_choice=tool_choice,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=clamp_max_tokens(runtime_model, max_tokens),
             reasoning_effort=reasoning_effort,
         )
 
@@ -135,6 +136,20 @@ class AntigravityClient:
                         },
                         method="POST",
                     )
+                    try:
+                        response = urllib.request.urlopen(req, timeout=30.0)
+                        break
+                    except Exception as retry_exc:
+                        last_error = retry_exc
+                        continue
+                elif err.code == 429:
+                    # Rate limited -> exponential backoff then retry same endpoint
+                    retry_after = 2
+                    logger.warning(
+                        "Antigravity 429 rate limit on %s, retrying in %ds",
+                        endpoint, retry_after,
+                    )
+                    time.sleep(retry_after)
                     try:
                         response = urllib.request.urlopen(req, timeout=30.0)
                         break

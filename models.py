@@ -44,6 +44,23 @@ DEFAULT_USER_AGENT = (
 )
 
 
+MAX_OUTPUT_TOKENS: dict[str, int] = {"claude": 64000, "gpt-oss": 32768, "gemini-3.8": 65536}
+DEFAULT_MAX_OUTPUT_TOKENS: int = 65535
+
+
+def clamp_max_tokens(model: str, max_tokens: int | None) -> int | None:
+    """Clamp max_tokens to the API ceiling for the given model family."""
+    if max_tokens is None:
+        return None
+    name = model.lower()
+    cap = DEFAULT_MAX_OUTPUT_TOKENS
+    for key, limit in MAX_OUTPUT_TOKENS.items():
+        if key in name:
+            cap = limit
+            break
+    return min(max_tokens, cap)
+
+
 def resolve_runtime_model(model_id: str) -> str:
     """Strip provider prefix and return clean model identifier."""
     clean = model_id.strip()

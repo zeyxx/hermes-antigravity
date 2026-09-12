@@ -13,6 +13,38 @@ except ImportError:
 
 _THOUGHT_SIGNATURES: dict[str, str] = {}
 
+_UNSUPPORTED_SCHEMA_KEYS = frozenset({
+    "anyOf", "oneOf", "allOf", "not", "if", "then", "else",
+    "dependentSchemas", "unevaluatedProperties", "propertyNames",
+    "patternProperties", "additionalProperties",
+    "$schema", "$id", "$defs", "definitions",
+})
+
+
+def _sanitize_schema(schema: Any) -> Any:
+    """Recursively strip JSON Schema keywords unsupported by the Antigravity API.
+
+    Claude validates tool schemas strictly and rejects unknown composition
+    keywords (anyOf, oneOf, ...).  Dropping them leaves the property
+    unconstrained rather than ill-typed; the description still reaches the
+    model so tool-calling quality is unaffected.
+    """
+    if isinstance(schema, list):
+        return [_sanitize_schema(i) for i in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for k, v in schema.items():
+        if k in _UNSUPPORTED_SCHEMA_KEYS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {n: _sanitize_schema(s) for n, s in v.items()}
+        elif k == "items":
+            out[k] = _sanitize_schema(v)
+        else:
+            out[k] = v
+    return out
+
 
 
 class ChoiceDeltaToolCallFunction:
@@ -199,6 +231,7 @@ def to_antigravity_payload(
                     fc_body: dict[str, Any] = {
                         "name": fn_name,
                         "args": args_dict or {},
+                        "id": tc_id,
                     }
                     fc_part: dict[str, Any] = {"functionCall": fc_body}
                     if sig:
@@ -226,6 +259,7 @@ def to_antigravity_payload(
                                 "functionResponse": {
                                     "name": fn_name,
                                     "response": {"content": res_content},
+                                    "id": tc_id,
                                 }
                             }
                         ],
@@ -263,7 +297,7 @@ def to_antigravity_payload(
                     {
                         "name": fn.get("name"),
                         "description": fn.get("description", ""),
-                        "parameters": fn.get("parameters", {}),
+                        "parameters": _sanitize_schema(fn.get("parameters", {})),
                     }
                 )
         if declarations:
