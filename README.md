@@ -15,7 +15,7 @@ A native inference provider plugin integrating **Google Antigravity / Cloud Code
 Google does **not** provide API keys for consumer or student subscriptions (Gemini Pro Student, Gemini Advanced, Google One AI Premium, Google Workspace for Education). Historically, Hermes Agent could only connect to Google via Google AI Studio API keys (`GOOGLE_API_KEY`) or Vertex AI service accounts, leaving subscription holders unable to use their quota.
 
 This plugin solves that problem: it authenticates directly with your Google account via OAuth 2.0 PKCE, unlocking your subscription models in Hermes Agent without burning paid API tokens!
-The architecture is directly inspired by and aligned with the proven `pi-antigravity` extension (`@earendil-works/pi`).
+This plugin is a Python port of the proven `pi-antigravity` extension for the Pi Coding Agent — same wire protocol, same model routing, same session envelope, re-architected as a native Hermes `ProviderProfile`. See Acknowledgements & Provenance below.
 
 
 ## 🏗️ Architecture
@@ -55,12 +55,15 @@ The architecture is directly inspired by and aligned with the proven `pi-antigra
 ## 🚀 Features
 
 - **Live Model Discovery (30+ models)**:
-  - `gemini-3.8-flash-tiered` / `gemini-3.8-flash` (recommended for fast agentic coding)
-  - `gemini-3.7-flash` / `gemini-3.7-flash-thinking`
-  - `gemini-2.5-pro`
+  - `gemini-3.8-flash` (recommended for fast agentic coding; auto-routed to the `-low`/`-medium`/`-high` runtime IDs that carry your quota)
+  - `gemini-3.7-flash` / `gemini-3.6-flash` / `gemini-3.5-flash`
+  - `gemini-3.1-pro` / `gemini-2.5-pro`
   - `gemini-2.5-flash`
-  - `claude-3-7-sonnet`
-  - `claude-3-5-sonnet`
+  - `claude-sonnet-4-6` / `claude-opus-4-6-thinking`
+- **Model Routing**: public IDs map to the suffixed runtime IDs Google attributes quota on. Sending a bare public ID returns 429 even with quota remaining — the client routes automatically, per thinking effort.
+- **Session Envelope**: stable conversation/trajectory IDs plus request labels on every call, so multi-turn usage is attributed to one session.
+- **Per-Model Output Caps**: `max_tokens` is clamped to each family ceiling (Claude 64000, gpt-oss 32768) instead of failing with HTTP 400.
+- **Strict Schema Sanitization**: tool schemas are stripped of keywords Claude rejects (`anyOf`, `oneOf`, `allOf`, …) before declaration.
 - **Native SSE Streaming & Thinking**: Server-Sent Events (SSE) streaming with live reasoning display (`delta.reasoning_content`) in the Hermes TUI and Gateway.
 - **Bidirectional Tool Calling**: Transparent mapping of OpenAI JSON schemas to Google Cloud Code Assist function declarations and function responses.
 - **Hybrid Authentication**:
@@ -69,7 +72,9 @@ The architecture is directly inspired by and aligned with the proven `pi-antigra
   - Transparent access token auto-refresh before expiration.
 - **Native Hermes Integration (`hermes model` & `/model`)**:
   - Interactive provider and model selection with persistent configuration in `~/.hermes/config.yaml`.
-- **Network Resilience**: Automatic failover across candidate endpoints (`daily-cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.sandbox.googleapis.com`, `cloudcode-pa.googleapis.com`).
+  - Native auth commands: `hermes auth add antigravity`, `hermes auth list`, `hermes auth status antigravity`, `hermes auth remove antigravity`.
+  - Multi-account registry with legacy migration.
+- **Network Resilience**: Automatic failover across candidate endpoints (`daily-cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.sandbox.googleapis.com`, `cloudcode-pa.googleapis.com`) plus retry with backoff on transient HTTP 429.
 
 ---
 
@@ -132,14 +137,14 @@ hermes model
 
 ### Direct CLI Invocation (One-Shot)
 ```bash
-hermes -z "Explain this file in one concise sentence" --provider antigravity --model gemini-3.8-flash-tiered
+hermes -z "Explain this file in one concise sentence" --provider antigravity --model gemini-3.8-flash
 ```
 
 ### Persistent Configuration in `~/.hermes/config.yaml`
 ```yaml
 model:
   provider: antigravity
-  name: gemini-3.8-flash-tiered
+  default: gemini-3.8-flash
   reasoning_effort: medium
 ```
 
@@ -147,7 +152,7 @@ model:
 
 ## 🧪 Tests
 
-Run the full suite of 15 unit and integration tests:
+Run the full suite (65 unit and integration tests):
 ```bash
 pytest tests/ -v
 ```
@@ -173,7 +178,7 @@ The reverse-engineered protocol wire format, Google Cloud Code Assist endpoint d
 - **Harness**: Pi Coding Agent ([`@earendil-works/pi`](https://github.com/earendil-works/pi))
 - **License**: MIT
 
-We ported, adapted, and re-architected these concepts into a native Python `model-provider` plugin implementing `ProviderProfile` for **Hermes Agent** (`nousresearch/hermes-agent`). All gratitude and credit for the foundational Cloud Code Assist discovery go to Rahul Arya and the Pi open-source community.
+We ported, adapted, and re-architected these concepts into a native Python `model-provider` plugin implementing `ProviderProfile` for **Hermes Agent** (`nousresearch/hermes-agent`). Ported 1:1 from the TypeScript source: the public-to-runtime model routing table, the session/trajectory request envelope, the tool-schema stripping, the thought-signature handling for Gemini 3+, and the SSE streaming protocol. All gratitude and credit for the foundational Cloud Code Assist discovery go to Rahul Arya and the Pi open-source community.
 
 ---
 
