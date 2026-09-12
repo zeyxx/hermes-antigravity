@@ -13,11 +13,25 @@ import urllib.request
 from typing import Any, Iterator
 try:
     from .auth import AntigravityAuthManager
-    from .models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model, clamp_max_tokens
+    from .models import (
+        ENDPOINT_FALLBACKS,
+        DEFAULT_USER_AGENT,
+        resolve_runtime_model,
+        clamp_max_tokens,
+        resolve_session_trajectory,
+        antigravity_request_envelope,
+    )
     from .translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
 except ImportError:
     from auth import AntigravityAuthManager
-    from models import ENDPOINT_FALLBACKS, DEFAULT_USER_AGENT, resolve_runtime_model, clamp_max_tokens
+    from models import (
+        ENDPOINT_FALLBACKS,
+        DEFAULT_USER_AGENT,
+        resolve_runtime_model,
+        clamp_max_tokens,
+        resolve_session_trajectory,
+        antigravity_request_envelope,
+    )
     from translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
 
 logger = logging.getLogger(__name__)
@@ -78,12 +92,25 @@ class AntigravityClient:
         max_tokens: int | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatCompletionChunk] | Any:
-        runtime_model = resolve_runtime_model(model)
-        token, project_id = self.auth.get_credentials()
-
         reasoning_effort = kwargs.get("reasoning_effort")
         if not reasoning_effort and isinstance(kwargs.get("extra_body"), dict):
             reasoning_effort = kwargs["extra_body"].get("reasoning_effort")
+
+        runtime_model = resolve_runtime_model(model, reasoning_effort)
+        token, project_id = self.auth.get_credentials()
+
+        trajectory = resolve_session_trajectory(messages)
+        step = max(1, len(messages))
+        request_index = sum(1 for m in messages if m.get("role") == "assistant")
+        envelope = antigravity_request_envelope(
+            wire_model_id=runtime_model,
+            step=step,
+            last_step_index=str(max(0, step - 1)),
+            request_index=request_index,
+            conversation_id=trajectory["conversationId"],
+            trajectory_id=trajectory["trajectoryId"],
+            is_claude=runtime_model.startswith("claude-"),
+        )
 
         payload = to_antigravity_payload(
             model=runtime_model,
@@ -94,6 +121,9 @@ class AntigravityClient:
             temperature=temperature,
             max_tokens=clamp_max_tokens(runtime_model, max_tokens),
             reasoning_effort=reasoning_effort,
+            session_id=envelope["sessionId"],
+            labels=envelope["labels"],
+            request_id=envelope["requestId"],
         )
 
         body_bytes = json.dumps(payload).encode("utf-8")

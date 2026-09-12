@@ -1,11 +1,12 @@
 import sys
+import pytest
 
 # Ensure Hermes agent is in sys.path dynamically
 from pathlib import Path
 hermes_agent_dir = Path.home() / ".hermes" / "hermes-agent"
 if hermes_agent_dir.is_dir() and str(hermes_agent_dir) not in sys.path:
     sys.path.insert(0, str(hermes_agent_dir))
-from providers import get_provider_profile  # noqa: E402
+from providers import get_provider_profile, list_providers
 
 
 def test_antigravity_profile_registered():
@@ -28,6 +29,24 @@ def test_antigravity_create_client_hook():
     assert hasattr(client.chat.completions, "create")
 
 def test_antigravity_model_flow_hook():
-    import hermes_cli.main as _m
-    assert "antigravity" in _m._PROVIDER_MODEL_FLOWS
-    assert callable(_m._PROVIDER_MODEL_FLOWS["antigravity"])
+    # The plugin owns a callable model flow for `hermes model` integration.
+    import importlib.util
+    from pathlib import Path
+    init_path = Path(__file__).resolve().parent.parent / "__init__.py"
+    spec = importlib.util.spec_from_file_location("_ag_init", init_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert callable(getattr(mod, "_model_flow_antigravity", None))
+    # Core registration is core-owned: only assert it when the core
+    # exposes the flow registry (older cores had _PROVIDER_MODEL_FLOWS;
+    # newer cores wire flows natively).
+    try:
+        import hermes_cli.main as _m
+    except ImportError:
+        return
+    flows = getattr(_m, "_PROVIDER_MODEL_FLOWS", None)
+    if flows is None:
+        return
+    assert "antigravity" in flows
+    assert callable(flows["antigravity"])

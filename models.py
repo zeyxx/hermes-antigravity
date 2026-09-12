@@ -39,10 +39,6 @@ ENDPOINT_FALLBACKS: list[str] = [
     "https://cloudcode-pa.googleapis.com",
 ]
 
-DEFAULT_USER_AGENT = (
-    "antigravity/cli/1.1.23 (aidev_client; os_type=linux; arch=amd64; cl=974125021; auth_method=consumer)"
-)
-
 
 MAX_OUTPUT_TOKENS: dict[str, int] = {"claude": 64000, "gpt-oss": 32768, "gemini-3.8": 65536}
 DEFAULT_MAX_OUTPUT_TOKENS: int = 65535
@@ -61,12 +57,151 @@ def clamp_max_tokens(model: str, max_tokens: int | None) -> int | None:
     return min(max_tokens, cap)
 
 
-def resolve_runtime_model(model_id: str) -> str:
-    """Strip provider prefix and return clean model identifier."""
+def resolve_runtime_model(model_id: str, reasoning_effort: str | None = None) -> str:
+    """Map a public model ID + thinking effort to a Google runtime model ID.
+
+    Google attributes quota on suffixed runtime IDs (``-low``/``-medium``/
+    ``-high``). Sending the bare public ID hits a different bucket and
+    returns 429 even when quota remains (measured 2026-09-12: bare
+    ``gemini-3.8-flash`` 429s while ``gemini-3.8-flash-low`` succeeds on
+    the same token). IDs that are already runtime IDs pass through
+    unchanged, as do models without a routing entry.
+    """
     clean = model_id.strip()
     if clean.startswith("antigravity/"):
-        clean = clean[len("antigravity/") :]
-    return clean
+        clean = clean[len("antigravity/"):]
+    routing = MODEL_ROUTING.get(clean)
+    if not routing:
+        return clean
+    return routing.get(_normalize_effort(reasoning_effort), routing["off"])
+
+
+def _normalize_effort(reasoning_effort: str | None) -> str:
+    """Normalize a free-form effort string to off/low/medium/high."""
+    if not reasoning_effort:
+        return "off"
+    effort = str(reasoning_effort).strip().lower()
+    if effort in ("off", "none", "minimal", "low"):
+        return "low" if effort in ("minimal", "low") else "off"
+    if effort == "medium":
+        return "medium"
+    if effort in ("high", "xhigh", "max"):
+        return "high"
+    return "off"
+
+
+MODEL_ROUTING: dict[str, dict[str, str]] = {
+    "gemini-3.8-flash": {
+        "off": "gemini-3.8-flash-low",
+        "low": "gemini-3.8-flash-low",
+        "medium": "gemini-3.8-flash-medium",
+        "high": "gemini-3.8-flash-high",
+    },
+    "gemini-3.7-flash": {
+        "off": "gemini-3.7-flash-low",
+        "low": "gemini-3.7-flash-low",
+        "medium": "gemini-3.7-flash-medium",
+        "high": "gemini-3.7-flash-high",
+    },
+    "gemini-3.6-flash": {
+        "off": "gemini-3.6-flash-low",
+        "low": "gemini-3.6-flash-low",
+        "medium": "gemini-3.6-flash-medium",
+        "high": "gemini-3.6-flash-high",
+    },
+    "gemini-3.5-flash": {
+        "off": "gemini-3.5-flash-extra-low",
+        "low": "gemini-3.5-flash-extra-low",
+        "medium": "gemini-3.5-flash-low",
+        "high": "gemini-3-flash-agent",
+    },
+    "gemini-3.1-pro": {
+        "off": "gemini-3.1-pro-low",
+        "low": "gemini-3.1-pro-low",
+        "medium": "gemini-3.1-pro-low",
+        "high": "gemini-pro-agent",
+    },
+    "claude-sonnet-4-6": {
+        "off": "claude-sonnet-4-6",
+        "low": "claude-sonnet-4-6",
+        "medium": "claude-sonnet-4-6",
+        "high": "claude-sonnet-4-6",
+    },
+    "claude-opus-4-6": {
+        "off": "claude-opus-4-6-thinking",
+        "low": "claude-opus-4-6-thinking",
+        "medium": "claude-opus-4-6-thinking",
+        "high": "claude-opus-4-6-thinking",
+    },
+}
+
+
+def stable_uuid(seed: str) -> str:
+    """Deterministic RFC 4122 v5 UUID from a seed string."""
+    import hashlib
+
+    raw = bytearray(hashlib.sha1(seed.encode()).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    hex_ = bytes(raw).hex()
+    return f"{hex_[:8]}-{hex_[8:12]}-{hex_[12:16]}-{hex_[16:20]}-{hex_[20:]}"
+
+
+_session_trajectory_map: dict[str, dict[str, str]] = {}
+
+
+def resolve_session_trajectory(messages: list[dict]) -> dict[str, str]:
+    """Stable conversationId/trajectoryId for a session (session affinity).
+
+    Google groups multi-turn usage by session; without stable IDs each
+    turn looks like a new session. The seed is the first message only so
+    follow-up turns in the same process reuse the same trajectory.
+    """
+    import json as _json
+
+    first_msg = messages[0] if messages else {}
+    content_seed = ""
+    if isinstance(first_msg.get("content"), str):
+        content_seed = first_msg["content"][:64]
+    elif isinstance(first_msg.get("content"), list) and first_msg["content"]:
+        content_seed = _json.dumps(first_msg["content"][0])[:64]
+    seed = f"{first_msg.get('role', 'user')}:{content_seed}"
+    if seed not in _session_trajectory_map:
+        _session_trajectory_map[seed] = {
+            "conversationId": stable_uuid(f"antigravity:conv:{seed}"),
+            "trajectoryId": stable_uuid(f"antigravity:traj:{seed}"),
+        }
+        if len(_session_trajectory_map) > 64:
+            oldest = next(iter(_session_trajectory_map))
+            del _session_trajectory_map[oldest]
+    return _session_trajectory_map[seed]
+
+
+def antigravity_request_envelope(
+    wire_model_id: str,
+    step: int = 1,
+    last_step_index: str = "0",
+    request_index: int = 0,
+    conversation_id: str = "",
+    trajectory_id: str = "",
+    is_claude: bool = False,
+) -> dict[str, Any]:
+    """Build requestId, sessionId and labels for one Antigravity request."""
+    model_enum = wire_model_id.replace("-", "_")
+    step_str = str(step)
+    labels: dict[str, str] = {
+        "antigravity/cli-version": "1.1.23",
+        "antigravity/model": model_enum,
+        "antigravity/step": step_str,
+        "antigravity/last-step-index": last_step_index,
+    }
+    if is_claude:
+        labels["antigravity/provider"] = "anthropic"
+    return {
+        "requestId": f"{trajectory_id}-{request_index}-{step_str}",
+        "sessionId": conversation_id,
+        "labels": labels,
+    }
 
 
 def get_thinking_config(model: str, reasoning_effort: str | None) -> dict[str, Any] | None:

@@ -161,3 +161,58 @@ def test_parse_sse_event_function_call():
     tc = delta["tool_calls"][0]
     assert tc["function"]["name"] == "bash"
     assert json.loads(tc["function"]["arguments"]) == {"command": "ls"}
+
+
+def test_payload_carries_session_envelope():
+    payload = to_antigravity_payload(
+        model="gemini-3.8-flash-low",
+        messages=[{"role": "user", "content": "hi"}],
+        project_id="p",
+        session_id="conv-1",
+        labels={"antigravity/model": "gemini_3.8_flash_low"},
+        request_id="traj-1-0-1",
+    )
+    # sessionId/labels nest INSIDE request (top-level => Google HTTP 400)
+    assert payload["request"]["sessionId"] == "conv-1"
+    assert payload["request"]["labels"] == {"antigravity/model": "gemini_3.8_flash_low"}
+    assert payload["requestId"] == "traj-1-0-1"
+    assert "sessionId" not in payload
+    assert "labels" not in payload
+
+
+def test_payload_without_envelope_omits_session_fields():
+    payload = to_antigravity_payload(
+        model="gemini-3.8-flash-low",
+        messages=[{"role": "user", "content": "hi"}],
+        project_id="p",
+    )
+    assert "sessionId" not in payload
+    assert "labels" not in payload
+    assert payload["requestId"]
+
+
+def test_function_response_uses_output_shape():
+    """Upstream pi-antigravity uses response.output; response.content is non-canonical."""
+    _THOUGHT_SIGNATURES["__last__"] = "sig-test"
+    try:
+        payload = to_antigravity_payload(
+            model="gemini-3.8-flash-low",
+            messages=[
+                {"role": "user", "content": "calc"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "call_1", "type": "function",
+                         "function": {"name": "calc", "arguments": "{}"}},
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+            ],
+            project_id="p",
+        )
+    finally:
+        _THOUGHT_SIGNATURES.pop("__last__", None)
+    fr = payload["request"]["contents"][-1]["parts"][0]["functionResponse"]
+    assert fr["response"] == {"output": "42"}
+    assert fr["id"] == "call_1"

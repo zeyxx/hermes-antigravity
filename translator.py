@@ -171,6 +171,8 @@ def to_antigravity_payload(
     max_tokens: int | None = None,
     reasoning_effort: str | None = None,
     session_id: str | None = None,
+    labels: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Convert Hermes messages and parameters into Google Antigravity wire payload."""
     contents: list[dict[str, Any]] = []
@@ -258,7 +260,7 @@ def to_antigravity_payload(
                             {
                                 "functionResponse": {
                                     "name": fn_name,
-                                    "response": {"content": res_content},
+                                    "response": {"output": res_content},
                                     "id": tc_id,
                                 }
                             }
@@ -303,7 +305,14 @@ def to_antigravity_payload(
         if declarations:
             request_body["tools"] = [{"functionDeclarations": declarations}]
 
-    req_id = f"{uuid.uuid4().hex[:12]}-0"
+    req_id = request_id or f"{uuid.uuid4().hex[:12]}-0"
+
+    # sessionId/labels live INSIDE the request object (Google rejects them
+    # as unknown top-level fields with HTTP 400 INVALID_ARGUMENT).
+    if session_id:
+        request_body["sessionId"] = session_id
+    if labels:
+        request_body["labels"] = labels
 
     return {
         "project": project_id,
