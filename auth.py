@@ -414,14 +414,17 @@ class AntigravityAuthManager:
 
         self.credentials = creds
 
-        # Persist to registry
+        # Persist by the Google account that just signed in. The manager may
+        # already have loaded the previous active account; updating that record
+        # keeps the old email and makes a second login look like a no-op.
         email = resolved_email or "unknown@unknown"
-        if self._account_id and self._account_record:
-            # Update existing account
-            self._registry.update_credentials(self._account_id, creds)
-            self._account_record = self._registry.get_account(self._account_id)
+        matched = self._registry.get_account(email) if email != "unknown@unknown" else None
+        if matched:
+            self._registry.update_credentials(matched.account_id, creds)
+            self._registry.set_active(matched.account_id)
+            self._account_record = self._registry.get_account(matched.account_id)
+            self._account_id = matched.account_id
         else:
-            # Add new account
             self._account_record = self._registry.add_account(email=email, credentials=creds)
             self._account_id = self._account_record.account_id
 
