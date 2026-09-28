@@ -118,7 +118,7 @@ def test_clamp_max_tokens_default_ceiling():
     assert clamp_max_tokens("gemini-3.8-flash", 65537) == 65536
 
 
-def test_fetch_available_models_fallback_on_failure():
+def test_fetch_available_models_empty_on_failure():
     with patch("urllib.request.urlopen", side_effect=Exception("network down")):
         models = fetch_available_models("fake-token", "fake-project")
-        assert models == list(FALLBACK_MODELS)
+        assert models == []

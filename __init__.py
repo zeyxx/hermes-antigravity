@@ -19,12 +19,12 @@ try:
     from .accounts import AntigravityAccountRegistry
     from .auth import AntigravityAuthManager, register_hermes_auth
     from .client import AntigravityClient
-    from .models import FALLBACK_MODELS, fetch_available_models
+    from .models import fetch_available_models
 except ImportError:
     from accounts import AntigravityAccountRegistry
     from auth import AntigravityAuthManager, register_hermes_auth
     from client import AntigravityClient
-    from models import FALLBACK_MODELS, fetch_available_models
+    from models import fetch_available_models
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class AntigravityProfile(ProviderProfile):
         base_url: str | None = None,
         timeout: float = 8.0,
     ) -> list[str]:
-        """Fetch available models dynamically from Antigravity API or return fallbacks."""
+        """Fetch only models confirmed by the live Antigravity catalog."""
         registry = AntigravityAccountRegistry()
         auth_mgr = AntigravityAuthManager(registry=registry)
         try:
@@ -53,7 +53,7 @@ class AntigravityProfile(ProviderProfile):
             return fetch_available_models(token, project_id, timeout=timeout)
         except Exception as exc:
             logger.debug("fetch_models failed: %s", exc)
-            return list(FALLBACK_MODELS)
+            return []
 
 
 antigravity = AntigravityProfile(
@@ -79,7 +79,9 @@ antigravity = AntigravityProfile(
     supports_vision_tool_messages=True,
     default_max_tokens=65536,
     default_aux_model="gemini-3.8-flash",
-    fallback_models=FALLBACK_MODELS,
+    # Antigravity's live catalog is authoritative.  Do not merge stale static
+    # IDs into the picker when discovery is unavailable or changes upstream.
+    fallback_models=(),
 )
 
 # Declare true auth type for hermes auth registration (OAuth2 PKCE, not API key)
@@ -117,10 +119,11 @@ except Exception as exc:
 
 def _model_flow_antigravity(config=None, current_model="", args=None):
     """Native model selection & OAuth flow for Google Antigravity in `hermes model`."""
-    from .auth import AntigravityAuthManager
-    from .models import FALLBACK_MODELS, fetch_available_models
     from hermes_cli.auth import _prompt_model_selection
     from hermes_cli.model_setup_flows_common import _activate_provider_model
+
+    from .auth import AntigravityAuthManager
+    from .models import fetch_available_models
 
     registry = AntigravityAccountRegistry()
 
@@ -147,7 +150,10 @@ def _model_flow_antigravity(config=None, current_model="", args=None):
 
     auth_mgr = AntigravityAuthManager(registry=registry)
     token, project_id = auth_mgr.get_credentials()
-    models = fetch_available_models(token, project_id) or list(FALLBACK_MODELS)
+    models = fetch_available_models(token, project_id)
+    if not models:
+        print("No active Antigravity models were returned; refresh after the provider is reachable.")
+        return
     default = current_model if current_model in models else models[0]
     selected = _prompt_model_selection(
         models,

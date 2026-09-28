@@ -261,4 +261,8 @@ def fetch_available_models(
 
     if discovered:
         return sorted(discovered)
-    return list(FALLBACK_MODELS)
+    # An empty live result is authoritative for the picker.  Returning a
+    # baked-in list here makes retired or unavailable models look active.
+    # Keep FALLBACK_MODELS for compatibility/tests, but never advertise it as
+    # a live catalog when Antigravity cannot confirm availability.
+    return []
