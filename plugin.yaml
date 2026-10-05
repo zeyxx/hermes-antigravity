@@ -3,3 +3,8 @@ kind: model-provider
 version: 1.1.1
 description: Google Antigravity / Cloud Code Assist inference provider for Hermes Agent
 author: Sovereign Operator
+# Hermes core must provide ProviderProfile.create_client(). Older cores ignore the
+# hook and POST an OpenAI-shaped request that the Antigravity API answers with a
+# silent 404 on every turn. __init__.py also gates this at load time; this field
+# is the declarative copy. See https://github.com/zeyxx/hermes-antigravity/issues/4
+min_hermes_version: "0.20.0"

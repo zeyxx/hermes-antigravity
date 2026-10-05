@@ -244,6 +244,44 @@ class AntigravityClient:
                     except Exception as retry_exc:
                         last_error = retry_exc
                         continue
+                elif err.code == 403:
+                    # 403 VALIDATION_REQUIRED means the Google account is unverified.
+                    # The relay buries the fix in a machine-readable error body, so
+                    # surface the verification link instead of a bare 403.
+                    err_body = ""
+                    try:
+                        err_body = err.read().decode("utf-8", errors="replace")
+                        err_data = json.loads(err_body)
+                    except Exception:
+                        err_data = {}
+
+                    validation_url = None
+                    validation_msg = (
+                        "Your Google account must be verified before using Antigravity."
+                    )
+                    # Google nests the detail list under "error"; tolerate both shapes.
+                    payload = err_data.get("error") if isinstance(err_data.get("error"), dict) else err_data
+                    details = payload.get("details", [])
+                    if isinstance(details, list):
+                        for detail in details:
+                            if isinstance(detail, dict) and detail.get("reason") == "VALIDATION_REQUIRED":
+                                meta = detail.get("metadata", {})
+                                if isinstance(meta, dict):
+                                    validation_url = meta.get("validation_url")
+                                    validation_msg = meta.get(
+                                        "validation_error_message", validation_msg
+                                    )
+                                break
+
+                    if validation_url:
+                        raise RuntimeError(
+                            f"Google account not verified. {validation_msg}\n"
+                            "Open this link in a browser to verify your account:\n"
+                            f"  -> {validation_url}\n"
+                            "Then re-run your command."
+                        ) from err
+                    err_msg = err_body or "no body"
+                    raise RuntimeError(f"Antigravity API HTTP {err.code}: {err_msg}") from err
                 elif err.code in (404, 500, 502, 503, 504):
                     # Candidate endpoint unavailable -> failover
                     continue
