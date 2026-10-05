@@ -20,8 +20,27 @@ logger = logging.getLogger(__name__)
 REGISTRY_VERSION = 2
 
 # Paths
-DEFAULT_REGISTRY_PATH = Path.home() / ".hermes" / "antigravity-accounts.json"
-LEGACY_CACHE_FILE = Path.home() / ".hermes" / "antigravity-auth.json"
+def _hermes_home() -> Path:
+    """Hermes root, honouring HERMES_HOME the way the core does.
+
+    Resolved through the core's own helper so a profile (`hermes -p ...`, or a
+    HERMES_HOME override) keeps its accounts with the rest of that profile. A
+    hardcoded ~/.hermes made every profile silently share one registry, which
+    looked like correct behaviour but broke the moment the core honoured
+    HERMES_HOME for real.
+    """
+    try:
+        from hermes_constants import get_default_hermes_root
+
+        return Path(get_default_hermes_root())
+    except Exception:
+        env = os.environ.get("HERMES_HOME", "").strip()
+        return Path(os.path.expanduser(env)) if env else Path.home() / ".hermes"
+
+
+HERMES_ROOT = _hermes_home()
+DEFAULT_REGISTRY_PATH = HERMES_ROOT / "antigravity-accounts.json"
+LEGACY_CACHE_FILE = HERMES_ROOT / "antigravity-auth.json"
 LEGACY_PI_AUTH = Path.home() / ".pi" / "agent" / "auth.json"
 LEGACY_GEMINI_TOKEN = Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
 
