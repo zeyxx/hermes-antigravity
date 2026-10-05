@@ -148,32 +148,52 @@ def _model_flow_antigravity(config=None, current_model="", args=None):
     from .models import fetch_available_models
 
     registry = AntigravityAccountRegistry()
-
-    # If multiple accounts, prompt to select one
     accounts = registry.list_accounts()
-    if len(accounts) > 1:
-        print("\n=== Multi-compte Antigravity detecte ===")
+
+    # Always offer the account selector, even with a single account: it is the only
+    # way to add another one from this flow. With zero accounts, go straight to login.
+    if accounts:
+        print("\n=== Comptes Antigravity ===")
         for i, acc in enumerate(accounts, 1):
             active = " (actif)" if acc.account_id == registry.active_account_id else ""
             print(f"  {i}. {acc.email}{active}")
         print(f"  {len(accounts) + 1}. Ajouter un nouveau compte")
         print()
-        choice = input("Selectionnez un compte (numero) : ").strip()
+        try:
+            choice = input("Selectionnez un compte (numero) : ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAnnulation.")
+            return
         try:
             idx = int(choice) - 1
             if 0 <= idx < len(accounts):
                 registry.set_active(accounts[idx].account_id)
             elif idx == len(accounts):
-                # Add new account
-                auth_mgr = AntigravityAuthManager(registry=registry)
-                auth_mgr.login_interactive()
+                AntigravityAuthManager(registry=registry).login_interactive()
+            else:
+                print("Entree invalide.")
+                return
         except (ValueError, IndexError):
-            pass
+            print("Entree invalide.")
+            return
+    else:
+        print("\n=== Authentification Antigravity ===")
+        try:
+            AntigravityAuthManager(registry=registry).login_interactive()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAnnulation.")
+            return
 
     auth_mgr = AntigravityAuthManager(registry=registry)
-    token, project_id = auth_mgr.get_credentials()
+    try:
+        token, project_id = auth_mgr.get_credentials()
+    except Exception as exc:
+        print(f"Echec de recuperation des credentials: {exc}")
+        return
     models = fetch_available_models(token, project_id)
     if not models:
+        # The live catalog is authoritative (see #8): an empty result means discovery
+        # failed, so do not offer stale ids that would 404 on use.
         print("No active Antigravity models were returned; refresh after the provider is reachable.")
         return
     default = current_model if current_model in models else models[0]
