@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect test count
+        # Recorded before the run: a module that fails to import silently drops its
+        # tests, and a suite that only runs a subset still reports green.
+        id: collect
+        run: |
+          count=$(python3 - <<'PY'
+          import importlib, sys
+          sys.path.insert(0, ".")
+          sys.path.insert(0, "/dev/null")
+          total = 0
+          failed = []
+          for m in ("tests.test_translator", "tests.test_models", "tests.test_auth",
+                    "tests.test_client", "tests.test_accounts"):
+              try:
+                  mod = importlib.import_module(m)
+              except Exception as exc:
+                  failed.append(f"{m}: {exc}")
+                  continue
+              total += sum(1 for n in dir(mod)
+                           if n.startswith("test_") and callable(getattr(mod, n)))
+          print(total)
+          if failed:
+              print("module import failures:", file=sys.stderr)
+              for f in failed:
+                  print("  " + f, file=sys.stderr)
+          PY
+          )
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Run test suite
+        # The plugin's own runner, not pytest: these tests need the Hermes provider
+        # package importable, and a plain pytest run collects fixtures this project
+        # does not use.
+        env:
+          PYTHONPATH: ".:${{ github.workspace }}"
+        run: |
+          python3 tools/run_tests.py --min-tests "${{ steps.collect.outputs.count }}"
+
+      - name: Lint
+        run: ruff check .
+
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compare wire constants against pi-antigravity
+        run: python3 tools/check_upstream_drift.py --refresh
+
+      - name: Drift report (machine-readable)
+        if: always()
+        run: python3 tools/check_upstream_drift.py --json > drift-report.json || true
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-drift-report
+          path: drift-report.json

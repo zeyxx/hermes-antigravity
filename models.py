@@ -187,6 +187,17 @@ _STATIC_MODEL_ENUMS: dict[str, str] = {
     "gemini-3.8-flash-medium": "MODEL_PLACEHOLDER_M319",
     "gemini-3.8-flash-low": "MODEL_PLACEHOLDER_M320",
     "gemini-3.8-flash-tiered": "MODEL_PLACEHOLDER_M322",
+    # Gemini Pro / agent variants
+    "gemini-pro-agent": "MODEL_PLACEHOLDER_M16",
+    "gemini-3-flash-agent": "MODEL_PLACEHOLDER_M84",
+    # Gemini 3.1 Pro
+    "gemini-3.1-pro": "MODEL_PLACEHOLDER_M36",
+    "gemini-3.1-pro-high": "MODEL_PLACEHOLDER_M37",
+    "gemini-3.1-pro-low": "MODEL_PLACEHOLDER_M36",
+    # Claude
+    "claude-opus-4-6": "MODEL_PLACEHOLDER_M26",
+    "claude-opus-4-6-thinking": "MODEL_PLACEHOLDER_M26",
+    "claude-sonnet-4-6": "MODEL_PLACEHOLDER_M35",
     # Gemini 3.7 Flash
     "gemini-3.7-flash": "MODEL_PLACEHOLDER_M298",
     "gemini-3.7-flash-high": "MODEL_PLACEHOLDER_M298",
@@ -203,6 +214,9 @@ _STATIC_MODEL_ENUMS: dict[str, str] = {
     "gemini-3.5-flash": "MODEL_PLACEHOLDER_M20",
     "gemini-3.5-flash-low": "MODEL_PLACEHOLDER_M20",
     "gemini-3.5-flash-extra-low": "MODEL_PLACEHOLDER_M187",
+    # OpenAI open-weight: enum does not follow the MODEL_PLACEHOLDER pattern
+    "gpt-oss-120b": "MODEL_OPENAI_GPT_OSS_120B_MEDIUM",
+    "gpt-oss-120b-medium": "MODEL_OPENAI_GPT_OSS_120B_MEDIUM",
 }
 
 _model_enum_cache: dict[str, str] = {}
