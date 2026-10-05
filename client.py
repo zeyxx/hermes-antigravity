@@ -81,6 +81,37 @@ class AntigravityClient:
         self.endpoints = endpoints or ENDPOINT_FALLBACKS
         self.chat = _ChatAdapter(self)
 
+    def _failover_to_next_account(self, tried_account_ids: set[str]) -> str | None:
+        """Switch to the next untried linked account after a quota wall.
+
+        Returns the new account's access token when one was activated, so the
+        caller can rebuild the request with it. Returns None when there is
+        nothing left to try, so the caller falls back to its backoff path.
+        """
+        registry = getattr(self.auth, "registry", None)
+        if registry is None:
+            return None
+        try:
+            account = registry.next_untried_account(tried_account_ids)
+        except Exception as exc:  # registry is optional; never fail the request over it
+            logger.debug("account failover unavailable: %s", exc)
+            return None
+        if account is None:
+            logger.warning("Antigravity 429 and no untried linked account remains")
+            return None
+        logger.warning(
+            "Antigravity 429 on the active account; failing over to %s", account.email
+        )
+        access = account.credentials.get("access_token")
+        if not access:
+            # Only a refresh token: mint one rather than hand back a dead request.
+            try:
+                access = self.auth.refresh_access_token()
+            except Exception as exc:
+                logger.warning("failover to %s could not refresh: %s", account.email, exc)
+                return None
+        return str(access)
+
     def generate(
         self,
         model: str,
@@ -130,6 +161,12 @@ class AntigravityClient:
 
         response = None
         last_error = None
+        tried_accounts: set[str] = set()
+        active_id = getattr(getattr(self.auth, "registry", None), "_data", {}).get(
+            "active_account"
+        ) if getattr(self.auth, "registry", None) is not None else None
+        if active_id:
+            tried_accounts.add(active_id)
 
         for endpoint in self.endpoints:
             url = f"{endpoint}/v1internal:streamGenerateContent?alt=sse"
@@ -173,7 +210,28 @@ class AntigravityClient:
                         last_error = retry_exc
                         continue
                 elif err.code == 429:
-                    # Rate limited -> exponential backoff then retry same endpoint
+                    # Rate limited -> try another linked account before sleeping.
+                    # A 429 from Antigravity is usually a per-account quota wall,
+                    # so retrying the same token just burns the backoff budget.
+                    new_token = self._failover_to_next_account(tried_accounts)
+                    if new_token:
+                        token = new_token
+                        current = getattr(self.auth, "registry", None)
+                        if current is not None:
+                            switched = current.get_account()
+                            if switched is not None:
+                                tried_accounts.add(switched.account_id)
+                        req = urllib.request.Request(
+                            url,
+                            data=body_bytes,
+                            headers={
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json",
+                                "User-Agent": DEFAULT_USER_AGENT,
+                            },
+                            method="POST",
+                        )
+                        continue
                     retry_after = 2
                     logger.warning(
                         "Antigravity 429 rate limit on %s, retrying in %ds",
