@@ -171,6 +171,7 @@ def test_fetch_available_models_empty_on_failure():
         assert models == []
 
 
+
 def test_core_client_factory_contract_is_detected():
     """The plugin is useless on a core without ProviderProfile.create_client.
 
@@ -216,3 +217,47 @@ def test_minimum_core_version_is_declared():
     assert plugin.MIN_CORE_VERSION == "0.20.0"
     parts = plugin.MIN_CORE_VERSION.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
+
+
+def test_session_id_separates_two_identical_openings():
+    """Two sessions opening on the same text must not share a trajectory.
+
+    The first-message seed cannot tell them apart, so Google groups both
+    conversations under one trajectory and usage reporting drifts.
+    """
+    same_opening = [{"role": "user", "content": "fix the build"}]
+    a = resolve_session_trajectory(same_opening, "session-a")
+    b = resolve_session_trajectory(same_opening, "session-b")
+    assert a["conversationId"] != b["conversationId"]
+    assert a["trajectoryId"] != b["trajectoryId"]
+
+
+def test_session_id_is_stable_across_turns():
+    """Every turn of one session reuses the same ids."""
+    first = resolve_session_trajectory([{"role": "user", "content": "a"}], "s-1")
+    later = resolve_session_trajectory(
+        [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}], "s-1"
+    )
+    assert first["conversationId"] == later["conversationId"]
+    assert first["trajectoryId"] == later["trajectoryId"]
+
+
+def test_trajectory_falls_back_to_first_message_without_session_id():
+    """Hermes does not always forward a session id; behaviour must not regress."""
+    messages = [{"role": "user", "content": "hello"}]
+    no_session = resolve_session_trajectory(messages)
+    assert no_session["conversationId"]
+    assert no_session["trajectoryId"]
+    # stable on a second call with the same opening
+    assert resolve_session_trajectory(messages)["conversationId"] == no_session["conversationId"]
+
+
+def test_blank_session_id_is_ignored():
+    """An empty or whitespace id must not collapse every session into one bucket."""
+    messages = [{"role": "user", "content": "hi"}]
+    blank = resolve_session_trajectory(messages, "   ")
+    assert blank["conversationId"] == resolve_session_trajectory(messages)["conversationId"]
+    named = resolve_session_trajectory(messages, "real")
+    assert named["conversationId"] != blank["conversationId"]
+
+
