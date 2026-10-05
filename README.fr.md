@@ -15,7 +15,7 @@ Ce plugin intègre l'infrastructure d'inférence **Google Antigravity / Cloud Co
 Google ne fournit **pas** de clés d'API pour les abonnements grand public ou étudiants (Gemini Pro Étudiant, Gemini Advanced, Google One AI Premium, Google Workspace for Education). Jusqu'à présent, Hermes Agent ne pouvait se connecter à Google que via des clés d'API Google AI Studio (`GOOGLE_API_KEY`) ou Vertex AI, empêchant les titulaires d'abonnements d'utiliser leurs quotas.
 
 Ce plugin résout ce problème : il s'authentifie directement avec votre compte Google via OAuth 2.0 PKCE, débloquant l'ensemble des modèles de votre abonnement dans Hermes Agent sans consommer de tokens payants !
-Ce plugin est un portage Python du plugin éprouvé `pi-antigravity` pour le Pi Coding Agent — même protocole wire, même routage de modèles, même enveloppe de session, ré-architecturé en `ProviderProfile` natif Hermes. Voir Remerciements & Provenance ci-dessous.
+**Projet de base & provenance :** ce plugin est une adaptation Python de [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) par Rahul Arya ([@Rahularya01](https://github.com/Rahularya01)), ré-architecturée en `ProviderProfile` natif Hermes. **Ce n'est pas un fork du dépôt Pi** — il réimplémente le même protocole wire, le même routage de modèles, la même enveloppe de session, le nettoyage des schémas d'outils, la gestion des thought-signatures et le streaming SSE. Chaque constante wire est suivie dans [`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md), afin qu'une divergence avec l'implémentation de référence reste visible au lieu d'être silencieuse. Voir [Remerciements & Provenance](#-remerciements--provenance-open-source).
 
 
 ## 🏗️ Architecture
@@ -80,6 +80,33 @@ Ce plugin est un portage Python du plugin éprouvé `pi-antigravity` pour le Pi 
 
 ## 📦 Installation & Découverte
 
+### Prérequis
+
+**Hermes Agent v0.20.0 ou plus récent.** Ce plugin fournit l'inférence via
+`ProviderProfile.create_client()`. Sur les cores plus anciens, ce hook n'existe pas : le
+provider se charge quand même et apparaît dans `hermes model`, mais chaque requête échoue
+en **HTTP 404** — le core construit discrètement son propre client de forme OpenAI et
+l'envoie à l'API Antigravity, qui ne parle pas cette forme.
+
+Si des requêtes répondent 404 sur un provider qui semble correctement configuré, vérifiez
+d'abord la version de votre core. Le plugin journalise une erreur explicite au chargement
+lorsque le hook est absent.
+
+**Mettre à jour une installation existante :** ne faites pas de `cp` par-dessus. Le plugin
+installé est lui-même un clone git et peut contenir des commits ou des modifications qui
+n'existent nulle part ailleurs ; une simple copie les détruit sans diff ni erreur. Utilisez
+la synchronisation protégée à la place :
+
+```bash
+./tools/sync-installed.sh --dry-run   # rapporte les changements, n'écrit rien
+./tools/sync-installed.sh             # synchronise, en refusant si la copie locale a du travail
+```
+
+Elle refuse quand l'arborescence installée est sale, quand elle contient des commits
+absents de son propre amont, ou quand elle est sur une révision inattendue — un travail qui
+n'existe que sur cette machine devient un échec bruyant plutôt qu'une perte silencieuse.
+`--force` passe outre, et le message indique ce que vous perdriez.
+
 Clonez simplement le dépôt dans votre répertoire de plugins Hermes :
 
 **Linux & macOS :**
@@ -123,6 +150,87 @@ python3 ~/.hermes/plugins/model-providers/antigravity/auth.py
 - `ANTIGRAVITY_REFRESH_TOKEN` : Jeton de rafraîchissement OAuth.
 - `ANTIGRAVITY_PROJECT_ID` : ID de projet Google Cloud Code Assist.
 - `ANTIGRAVITY_BASE_URL` : Surcharge optionnelle de l'endpoint d'inférence.
+- `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET` : utiliser votre propre client OAuth
+  Google au lieu du client par défaut.
+
+### 4. Sécurité des identifiants
+
+**Le client OAuth par défaut est le client public desktop d'Antigravity de Google, pas un
+secret d'application privé.**
+
+Un client OAuth « installed app » ne peut pas garder de secret : le binaire l'embarque, la
+valeur est donc publique par nature et sa seule protection est que Google la considère comme
+non confidentielle. Ce plugin embarque le même identifiant client public que l'application
+Antigravity Desktop officielle, à l'octet près identique à
+[`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) (MIT), qui l'a
+rétro-ingénieré depuis le CLI officiel.
+
+C'est différent d'un secret d'API, et c'est pourquoi un scanner de secrets peut le signaler :
+
+- **La valeur embarquée est publique par conception.** Elle ne donne aucun accès à elle
+  seule — un échange de jeton exige toujours une connexion Google interactive par le
+  propriétaire du compte.
+- **Les identifiants réellement sensibles sont les jetons, et ils ne sont jamais dans ce
+  dépôt.** `ANTIGRAVITY_REFRESH_TOKEN` est un identifiant de compte vivant : gardez-le hors
+  du contrôle de version, des issues et des logs de discussion.
+- **Ne committez pas de vrais jetons.** Les comptes stockés vivent dans
+  `~/.hermes/antigravity-accounts.json`, qui doit rester accessible au seul propriétaire
+  (`chmod 600`).
+- **Préférez votre propre client pour tout ce qui est sensible.** Définissez
+  `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET` si vous voulez votre propre quota,
+  votre propre piste d'audit et votre propre surface de révocation.
+
+Si un scanner bloque un push ici, lisez cette section avant de la passer outre : vérifiez que
+la valeur signalée est bien le *client desktop public* embarqué, et non un jeton
+utilisateur. Un push bloqué mérite d'être compris plutôt que forcé.
+
+Scopes OAuth demandés à la connexion :
+
+<!-- prettier-ignore -->
+| Scope | Raison |
+| --- | --- |
+| `aicode` | Accès au catalogue et aux endpoints Cloud Code Assist / Antigravity |
+| `cloud-platform` | Accès général à l'API Cloud Code Assist |
+| `userinfo.email`, `userinfo.profile` | Identifier le compte Google connecté |
+| `cclog` | Endpoints de logging/télémétrie Cloud Code Assist utilisés par l'API |
+| `experimentsandconfigs` | Flags d'expérimentation et de configuration côté serveur |
+
+Examinez ces permissions avant d'approuver l'accès. Si des identifiants expirent ou sont
+révoqués, relancez `hermes model` et resélectionnez Google Antigravity.
+
+### 5. Plusieurs profils Hermes
+
+La découverte des plugins est par profil. Si vous utilisez plusieurs profils Hermes
+(`hermes -p <profile> ...`, ou une surcharge de `HERMES_HOME`), liez le plugin dans chacun :
+
+```bash
+for profile in work personal; do
+  mkdir -p ~/.hermes/profiles/$profile/plugins/model-providers
+  ln -s ~/.hermes/plugins/model-providers/antigravity \
+          ~/.hermes/profiles/$profile/plugins/model-providers/antigravity
+done
+```
+
+**Chaque profil conserve ses propres comptes.** Le registre de comptes est résolu via le
+`HERMES_HOME` du profil, donc les identifiants ne fuient jamais entre profils. Connectez-vous
+une fois par profil :
+
+```bash
+hermes -p work model     # puis sélectionnez Google Antigravity
+hermes -p personal model # puis sélectionnez Google Antigravity
+```
+
+Si vous *voulez* un seul jeu de comptes Google entre profils, liez plutôt le registre — c'est
+un unique fichier JSON, `chmod 600` :
+
+```bash
+ln -s ~/.hermes/antigravity-accounts.json ~/.hermes/profiles/work/antigravity-accounts.json
+```
+
+> Avant la v1.1.2, tous les profils partageaient `~/.hermes/antigravity-accounts.json` parce
+> que le chemin était codé en dur au lieu d'être résolu via `HERMES_HOME`. Cela ressemblait
+> à un partage fonctionnel et aurait cassé dans l'autre sens dès que le core aurait honoré la
+> variable. Les profils sont isolés par défaut désormais.
 
 ---
 
@@ -166,6 +274,29 @@ Ce plugin utilise les endpoints Google Cloud Code Assist (`cloudcode-pa.googleap
 **Utilisation à vos propres risques.** Les auteurs de ce plugin ne sont pas responsables des conséquences liées à son utilisation.
 
 ---
+
+## 🔄 Dérive vis-à-vis de l'amont
+
+Ce plugin est un portage de [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity),
+qui possède le protocole wire que ce plugin réimplémente. L'amont avance ; un portage n'a
+aucun compilateur pour s'en apercevoir.
+
+**[`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md)** liste chaque champ wire, sa valeur de chaque
+côté, et la date de la dernière vérification. Les tests asserteraient le côté portage, donc
+une mise à jour amont se traduit par un test rouge plutôt que par une dégradation silencieuse
+— le mode de défaillance derrière chaque incident réel dans l'historique de ce plugin (une
+empreinte de CLI périmée, un hook de core manquant).
+
+Si vous portez quelque chose depuis l'amont, mettez à jour ce fichier dans la même PR.
+
+**Vérification automatisée :**
+
+```bash
+python3 tools/check_upstream_drift.py --refresh
+```
+
+Le script compare les constantes extraites de l'amont à celles du code, signale les écarts,
+et peut être utilisé en local comme dans la CI.
 
 ## 🙏 Remerciements & Provenance Open Source
 
