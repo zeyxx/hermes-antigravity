@@ -17,12 +17,20 @@ from providers.base import ProviderProfile
 
 try:
     from .accounts import AntigravityAccountRegistry
-    from .auth import AntigravityAuthManager, register_hermes_auth
+    from .auth import (
+        AntigravityAuthManager,
+        antigravity_auth_handler,
+        antigravity_refresh_credential,
+    )
     from .client import AntigravityClient
     from .models import fetch_available_models
 except ImportError:
     from accounts import AntigravityAccountRegistry
-    from auth import AntigravityAuthManager, register_hermes_auth
+    from auth import (
+    AntigravityAuthManager,
+    antigravity_auth_handler,
+    antigravity_refresh_credential,
+)
     from client import AntigravityClient
     from models import fetch_available_models
 
@@ -104,10 +112,15 @@ antigravity = AntigravityProfile(
     # Antigravity's live catalog is authoritative.  Do not merge stale static
     # IDs into the picker when discovery is unavailable or changes upstream.
     fallback_models=(),
+    # Public surface for `hermes auth add|status|logout|refresh antigravity`.
+    # auth_handler owns `add` (the PKCE login has no core token endpoint);
+    # status and logout are served from the credential pool it fills, and
+    # refresh_credential lets the pool rotate the token pair on its own
+    # schedule. Declaring these is what keeps the plugin off the core's private
+    # tables, which catalog admission rule 9 refuses.
+    auth_handler=antigravity_auth_handler,
+    refresh_credential=antigravity_refresh_credential,
 )
-
-# Declare true auth type for hermes auth registration (OAuth2 PKCE, not API key)
-antigravity._oauth_auth_type = "oauth_external"
 
 register_provider(antigravity)
 
@@ -120,12 +133,7 @@ try:
 except Exception:
     pass
 
-# Register with hermes auth system (enables `hermes auth add antigravity`)
-_hermes_auth_registered = register_hermes_auth()
-if _hermes_auth_registered:
-    logger.debug("Antigravity registered with hermes auth system")
-else:
-    logger.debug("Antigravity hermes auth registration skipped (hermes_cli unavailable)")
+logger.debug("Antigravity auth surfaces declared on the provider profile")
 
 # Register overlay so Hermes main chat uses plugin's AntigravityClient
 try:

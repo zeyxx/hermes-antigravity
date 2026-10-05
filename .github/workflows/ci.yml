@@ -32,33 +32,15 @@ jobs:
       - name: Collect test count
         # Recorded before the run: a module that fails to import silently drops its
         # tests, and a suite that only runs a subset still reports green.
+        # Single source of truth: tools/run_tests.py --collect-only counts with
+        # the same MODULES list and the same collector the run uses, so the two
+        # cannot drift apart (a hand-maintained copy once missed a whole module
+        # and every Test* class).
         id: collect
         env:
           PYTHONPATH: ".:${{ env.HERMES_CORE }}"
         run: |
-          count=$(python3 - <<'PY'
-          import importlib, sys, os
-          sys.path.insert(0, ".")
-          sys.path.insert(0, os.environ["HERMES_CORE"])
-          try:
-              import providers  # noqa: F401
-          except Exception as exc:
-              print(f"providers unavailable: {exc}", file=sys.stderr)
-              print(0)
-              raise SystemExit(0)
-          total = 0
-          for m in ("tests.test_translator", "tests.test_models", "tests.test_auth",
-                    "tests.test_client", "tests.test_accounts"):
-              try:
-                  mod = importlib.import_module(m)
-              except Exception as exc:
-                  print(f"module import failure {m}: {exc}", file=sys.stderr)
-                  continue
-              total += sum(1 for n in dir(mod)
-                           if n.startswith("test_") and callable(getattr(mod, n)))
-          print(total)
-          PY
-          )
+          count=$(python3 tools/run_tests.py --collect-only)
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "collected $count tests"
 

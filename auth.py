@@ -6,8 +6,10 @@ for the Hermes Agent Python runtime.
 Multi-account support: credentials are stored in ~/.hermes/antigravity-accounts.json
 with automatic migration from legacy single-account format.
 
-Native Hermes auth integration: registers with `hermes auth add antigravity`
-and `hermes auth remove antigravity` via the _OAUTH_ADD_SPECS and RemovalStep hooks.
+Native Hermes auth integration: the provider profile declares `auth_handler` and
+`refresh_credential`, the public seam for `hermes auth
+add|status|logout|refresh antigravity`. Nothing is written into the core's private
+tables.
 Standalone CLI (`auth.py login|list|switch|remove|status`) is kept as a fallback.
 """
 from __future__ import annotations
@@ -570,6 +572,76 @@ def _antigravity_fields_extractor(creds: dict, provider: str) -> dict:
     }
 
 
+def antigravity_refresh_credential(entry: Any) -> dict[str, Any] | None:
+    """``ProviderProfile.refresh_credential``: rotate one pooled row's token pair.
+
+    Called by ``agent.credential_pool`` on its own schedule; returning rotated
+    fields is what keeps the bearer out of the "still live" bucket. The refresh
+    token itself is re-read from the account registry rather than trusted from
+    the pool row, so a stale pool copy cannot pin a dead pair.
+    """
+    registry = AntigravityAccountRegistry()
+    access = (getattr(entry, "access_token", "") or "").strip()
+    refresh = (getattr(entry, "refresh_token", "") or "").strip()
+    if not refresh:
+        return None
+
+    account = None
+    for candidate in registry.list_accounts():
+        creds = candidate.credentials or {}
+        if creds.get("access_token") == access or creds.get("refresh_token") == refresh:
+            account = candidate
+            break
+
+    manager = AntigravityAuthManager(
+        registry=registry,
+        account_id=account.account_id if account else None,
+        credentials=dict(account.credentials) if account else None,
+    )
+    rotated = manager.refresh_access_token()
+    return {"access_token": rotated, "refresh_token": (manager.credentials or {}).get("refresh_token", refresh)}
+
+
+def antigravity_auth_handler(action: str, args: Any) -> bool:
+    """``ProviderProfile.auth_handler`` for Google Antigravity.
+
+    The core calls this first for ``hermes auth add|status|logout|refresh
+    antigravity``. Return True when the plugin owned the action.
+
+    Only ``add`` is handled here:
+
+    - ``status`` and ``logout`` are already served for a plugin-mirrored provider:
+      ``get_plugin_oauth_auth_status`` reads the credential pool this handler
+      fills, and logout removes from the same pool.
+    - ``refresh`` is owned by the core: declaring ``refresh_credential`` makes the
+      pool rotate the token itself (``agent.credential_pool``), so handling it
+      here would double-refresh.
+    - ``add`` is ours: the login owns a Google OAuth 2.0 PKCE flow with a loopback
+      callback, and the core has no token endpoint to call for it.
+    """
+    if action != "add":
+        return False
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("antigravity")
+    creds = _antigravity_oauth_login(args)
+    token = _antigravity_token_extractor(creds)
+    label = (getattr(args, "label", None) or "").strip() or (
+        f"{creds.get('email') or 'antigravity'}-oauth-{len(pool.entries()) + 1}"
+    )
+    pool.add(
+        label,
+        source="manual:antigravity_pkce",
+        token=token,
+        fields=_antigravity_fields_extractor(creds, "antigravity"),
+    )
+    pool.save()
+    who = creds.get("email") or "unknown"
+    print(f"Signed in to Google Antigravity as {who} ({label}).")
+    return True
+
+
 def _antigravity_remove_source(provider: str, removed) -> Any:
     """RemoveStep for hermes auth remove antigravity — cleans the account registry."""
     from agent.credential_sources import RemovalResult
@@ -647,48 +719,6 @@ def _register_removal_step() -> bool:
         logger.debug("Antigravity removal-step registration skipped: %s", exc)
         return False
 
-
-def register_hermes_auth() -> bool:
-    """Register antigravity with hermes auth system.
-    
-    Called automatically when the plugin loads. Enables:
-    - `hermes auth add antigravity --type oauth` — interactive OAuth login
-    - `hermes auth remove antigravity <n>` — remove account from registry
-    - `hermes auth list` — show antigravity accounts
-    - `hermes auth status antigravity` — show active account status
-    
-    Returns True if registration succeeded.
-    """
-    try:
-        from hermes_cli import auth_commands as auth_cmd
-
-        # 1. Register as OAuth-capable provider
-        if hasattr(auth_cmd, '_OAUTH_CAPABLE_PROVIDERS'):
-            auth_cmd._OAUTH_CAPABLE_PROVIDERS.add("antigravity")
-
-        # 2. Register OAuth add spec
-        if hasattr(auth_cmd, '_OAUTH_ADD_SPECS') and hasattr(auth_cmd, '_OAuthAddSpec'):
-            auth_cmd._OAUTH_ADD_SPECS["antigravity"] = auth_cmd._OAuthAddSpec(
-                login=_antigravity_oauth_login,
-                token=_antigravity_token_extractor,
-                source="manual:antigravity_pkce",
-                fields=_antigravity_fields_extractor,
-                activate_first=False,  # Don't auto-switch provider
-            )
-    except Exception as exc:
-        logger.debug("Could not register antigravity with hermes auth: %s", exc)
-        return False
-
-    # 3. Register removal step (independent: add/list/status survive if the
-    #    core removes the credential_sources shim — see _register_removal_step).
-    if _register_removal_step():
-        logger.debug("Antigravity registered with hermes auth system")
-    else:
-        logger.debug("Antigravity auth registered without removal step")
-    return True
-
-
-# ── CLI Interface (fallback) ──────────────────────────────────────
 
 def cli_main() -> None:
     """CLI entry point for account management (fallback when hermes auth is unavailable)."""

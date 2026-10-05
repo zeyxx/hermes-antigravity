@@ -39,6 +39,7 @@ MODULES = (
     "tests.test_accounts",
     "tests.test_auth",
     "tests.test_client",
+    "tests.test_provider_registration",
 )
 
 
@@ -46,16 +47,15 @@ def _collect_callables(module_name: str, module: Any) -> list[tuple[str, Any]]:
     """Yield (label, callable) for module-level and class-level test functions.
 
     Class-based tests matter: `test_accounts.py` groups its registry tests in
-    `TestAntigravityAccountRegistry`, and a runner that only walks module globals
-    skips the whole class without a word. That is silent coverage loss, which is
-    the failure mode this runner exists to prevent.
+    `TestAntigravityAccountRegistry` and `TestEdgeCases` (pytest `Test*`
+    classes, not `test_*` globals). A runner that only walks module globals
+    skips those whole classes without a word. That is silent coverage loss,
+    which is the failure mode this runner exists to prevent.
     """
     found: list[tuple[str, Any]] = []
     for attr in sorted(dir(module)):
-        if not attr.startswith("test_"):
-            continue
         obj = getattr(module, attr)
-        if inspect.isclass(obj):
+        if inspect.isclass(obj) and attr.startswith("Test") and obj.__module__ == module.__name__:
             instance = obj()
             for meth in sorted(dir(obj)):
                 if not meth.startswith("test_"):
@@ -63,7 +63,7 @@ def _collect_callables(module_name: str, module: Any) -> list[tuple[str, Any]]:
                 fn = getattr(instance, meth)
                 if callable(fn):
                     found.append((f"{module_name}::{attr}::{meth}", fn))
-        elif callable(obj):
+        elif attr.startswith("test_") and callable(obj):
             found.append((f"{module_name}::{attr}", obj))
     return found
 
@@ -90,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="fail if fewer than this many tests ran",
     )
+    ap.add_argument(
+        "--collect-only",
+        action="store_true",
+        help="print the collectable test count and exit (single source for CI)",
+    )
     args = ap.parse_args(argv)
 
     # Hermes' plugin loader re-execs this process through runpy, which REPLACES
@@ -98,6 +103,13 @@ def main(argv: list[str] | None = None) -> int:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     importlib.import_module("providers")  # establish the provider registry first
+
+    if args.collect_only:
+        total, broken = collect()
+        for line in broken:
+            print(f"unimportable: {line}", file=sys.stderr)
+        print(total)
+        return 1 if broken else 0
 
     def _reanchor() -> None:
         if str(REPO_ROOT) in sys.path:
