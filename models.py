@@ -11,13 +11,25 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+CLI_VERSION = "1.2.4"
+CLI_BUILD = "982146307"
+
+
 def get_user_agent() -> str:
-    """Return authentic Antigravity CLI wire User-Agent matching host OS and arch."""
+    """Return authentic Antigravity CLI wire User-Agent matching host OS and arch.
+
+    CLI_VERSION / CLI_BUILD track the official Antigravity desktop client that the
+    relay expects. When upstream moves, tests/test_models.py fails until this is
+    bumped in lockstep with pi-antigravity.
+    """
     sys_os = platform.system().lower()
     os_type = "windows" if "win" in sys_os else ("darwin" if "darwin" in sys_os else "linux")
     machine = platform.machine().lower()
     arch = "arm64" if ("arm" in machine or "aarch64" in machine) else "amd64"
-    return f"antigravity/cli/1.1.23 (aidev_client; os_type={os_type}; arch={arch}; cl=974125021; auth_method=consumer)"
+    return (
+        f"antigravity/cli/{CLI_VERSION} (aidev_client; os_type={os_type}; "
+        f"arch={arch}; cl={CLI_BUILD}; auth_method=consumer)"
+    )
 
 
 DEFAULT_USER_AGENT = get_user_agent()
@@ -190,7 +202,7 @@ def antigravity_request_envelope(
     model_enum = wire_model_id.replace("-", "_")
     step_str = str(step)
     labels: dict[str, str] = {
-        "antigravity/cli-version": "1.1.23",
+        "antigravity/cli-version": CLI_VERSION,
         "antigravity/model": model_enum,
         "antigravity/step": step_str,
         "antigravity/last-step-index": last_step_index,

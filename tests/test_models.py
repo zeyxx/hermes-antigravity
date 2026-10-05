@@ -12,7 +12,54 @@ from models import (
     stable_uuid,
     resolve_session_trajectory,
     antigravity_request_envelope,
+    get_user_agent,
+    DEFAULT_USER_AGENT,
+    CLI_VERSION,
+    CLI_BUILD,
 )
+
+
+def test_wire_fingerprint_matches_official_cli():
+    """Pin the CLI wire fingerprint to the value pi-antigravity ships.
+
+    This is a drift detector, not a style assertion. The relay scores
+    requests on this fingerprint; when upstream bumps the CLI version or
+    build number and this port does not, requests degrade silently rather
+    than failing loudly. Bump CLI_VERSION/CLI_BUILD in models.py in the
+    same change when pi-antigravity moves (upstream 0.8.1 / PR #63 did).
+    """
+    assert CLI_VERSION == "1.2.4", (
+        "Antigravity CLI version drifted from pi-antigravity; update models.py")
+    assert CLI_BUILD == "982146307", (
+        "Antigravity CLI build number drifted from pi-antigravity; update models.py")
+    ua = DEFAULT_USER_AGENT
+    assert ua.startswith("antigravity/cli/1.2.4 (")
+    assert "cl=982146307" in ua
+    assert "auth_method=consumer" in ua
+
+
+def test_wire_fingerprint_reports_host_os_and_arch():
+    """os_type/arch must follow the host, the rest of the fingerprint is fixed."""
+    import platform as _platform
+
+    ua = get_user_agent()
+    machine = _platform.machine().lower()
+    expected_arch = "arm64" if ("arm" in machine or "aarch64" in machine) else "amd64"
+    assert f"arch={expected_arch}" in ua
+    assert "os_type=" in ua
+    assert "os_type=unknown" not in ua
+
+
+def test_request_envelope_carries_current_cli_version_label():
+    envelope = antigravity_request_envelope(
+        wire_model_id="gemini-3.8-flash-low",
+        step=1,
+        last_step_index="0",
+        request_index=0,
+        conversation_id="conv-1",
+        trajectory_id="traj-1",
+    )
+    assert envelope["labels"]["antigravity/cli-version"] == CLI_VERSION
 
 
 def test_fallback_models_contains_expected_architectures():
