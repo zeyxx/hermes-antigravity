@@ -256,6 +256,28 @@ class AntigravityAccountRegistry:
             self._data["accounts"][account_id]["last_used"] = time.time()
             self._save()
 
+    def next_untried_account(
+        self, tried_account_ids: set[str] | None = None
+    ) -> AccountRecord | None:
+        """Return the least-recently-used account not already tried, and make it active.
+
+        Used when the relay returns a hard quota wall (HTTP 429): retrying the
+        same exhausted account only burns the backoff budget, so the caller
+        switches account and retries once. Mirrors pi-antigravity
+        ``failoverToNextAccount``. Accounts without a usable refresh token are
+        skipped rather than handed back, because switching to one cannot
+        recover the session.
+        """
+        tried = tried_account_ids or set()
+        for account in self.list_accounts():  # least-recently-used first
+            if account.account_id in tried:
+                continue
+            if not account.credentials.get("access_token") and not account.has_refresh_token():
+                continue
+            self.set_active(account.account_id)
+            return account
+        return None
+
     def touch(self, email_or_id: str | None = None) -> None:
         """Update last_used timestamp for an account."""
         account_id = self._resolve_account_id(email_or_id) if email_or_id else self._data.get("active_account")

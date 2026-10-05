@@ -406,3 +406,76 @@ class TestEdgeCases:
             acc2 = reg.get_account("alice@example.com")
             assert acc2 is not None
             assert acc2.last_used > old_ts
+
+
+def _isolated_registry(emails):
+    """Build a registry isolated from the developer's real ~/.hermes state.
+
+    accounts.py resolves LEGACY_CACHE_FILE at import time, so a legacy auth
+    file on the host machine migrates into the registry under test and shows
+    up as a phantom account. Point it at a missing path while we build.
+    """
+    import tempfile
+    import accounts as _accounts_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    original = _accounts_mod.LEGACY_CACHE_FILE
+    _accounts_mod.LEGACY_CACHE_FILE = sandbox / "no-legacy-auth.json"
+    try:
+        reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+        for i, email in enumerate(emails):
+            reg.add_account(
+                email=email,
+                credentials={"access_token": f"tok-{i}", "refresh_token": f"ref-{i}",
+                             "expires_at": 9e9},
+            )
+    finally:
+        _accounts_mod.LEGACY_CACHE_FILE = original
+    return reg
+
+
+def test_next_untried_account_switches_and_activates():
+    reg = _isolated_registry(["a@x.com", "b@x.com"])
+    first = reg.next_untried_account()
+    assert first is not None
+    assert reg.get_account().account_id == first.account_id
+
+
+def test_next_untried_account_skips_already_tried():
+    reg = _isolated_registry(["a@x.com", "b@x.com", "c@x.com"])
+    seen = []
+    for _ in range(5):
+        nxt = reg.next_untried_account(set(seen))
+        if nxt is None:
+            break
+        seen.append(nxt.account_id)
+    assert len(seen) == 3, "every account should be offered exactly once"
+    assert len(set(seen)) == 3
+    assert reg.next_untried_account(set(seen)) is None
+
+
+def test_next_untried_account_returns_none_when_exhausted():
+    reg = _isolated_registry(["only@x.com"])
+    acct = reg.get_account()
+    assert reg.next_untried_account({acct.account_id}) is None
+
+
+def test_next_untried_account_skips_account_without_usable_token():
+    import tempfile
+    import accounts as _accounts_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    original = _accounts_mod.LEGACY_CACHE_FILE
+    _accounts_mod.LEGACY_CACHE_FILE = sandbox / "no-legacy-auth.json"
+    try:
+        reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+        reg.add_account(email="dead@x.com", credentials={})
+        reg.add_account(email="live@x.com",
+                        credentials={"access_token": "t", "refresh_token": "r", "expires_at": 9e9})
+    finally:
+        _accounts_mod.LEGACY_CACHE_FILE = original
+    nxt = reg.next_untried_account()
+    assert nxt is not None
+    assert nxt.email == "live@x.com"
