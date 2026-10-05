@@ -162,22 +162,37 @@ def stable_uuid(seed: str) -> str:
 _session_trajectory_map: dict[str, dict[str, str]] = {}
 
 
-def resolve_session_trajectory(messages: list[dict]) -> dict[str, str]:
+def resolve_session_trajectory(
+    messages: list[dict], session_id: str | None = None
+) -> dict[str, str]:
     """Stable conversationId/trajectoryId for a session (session affinity).
 
     Google groups multi-turn usage by session; without stable IDs each
-    turn looks like a new session. The seed is the first message only so
-    follow-up turns in the same process reuse the same trajectory.
+    turn looks like a new session.
+
+    An explicit ``session_id`` is authoritative and takes precedence: it is
+    the only seed that actually distinguishes two conversations, since two
+    unrelated sessions can open on the same text. This mirrors
+    pi-antigravity resolveSessionTrajectory (PR #63). Hermes does not always
+    forward a session id to providers, so the first-message seed remains as
+    a fallback rather than a replacement.
+
+    The fallback seed is the first message only, so follow-up turns in the
+    same process reuse the same trajectory.
     """
     import json as _json
 
-    first_msg = messages[0] if messages else {}
-    content_seed = ""
-    if isinstance(first_msg.get("content"), str):
-        content_seed = first_msg["content"][:64]
-    elif isinstance(first_msg.get("content"), list) and first_msg["content"]:
-        content_seed = _json.dumps(first_msg["content"][0])[:64]
-    seed = f"{first_msg.get('role', 'user')}:{content_seed}"
+    explicit = str(session_id or "").strip()
+    if explicit:
+        seed = f"session:{explicit}"
+    else:
+        first_msg = messages[0] if messages else {}
+        content_seed = ""
+        if isinstance(first_msg.get("content"), str):
+            content_seed = first_msg["content"][:64]
+        elif isinstance(first_msg.get("content"), list) and first_msg["content"]:
+            content_seed = _json.dumps(first_msg["content"][0])[:64]
+        seed = f"{first_msg.get('role', 'user')}:{content_seed}"
     if seed not in _session_trajectory_map:
         _session_trajectory_map[seed] = {
             "conversationId": stable_uuid(f"antigravity:conv:{seed}"),

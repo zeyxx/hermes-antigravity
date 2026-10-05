@@ -99,7 +99,7 @@ class AntigravityClient:
         runtime_model = resolve_runtime_model(model, reasoning_effort)
         token, project_id = self.auth.get_credentials()
 
-        trajectory = resolve_session_trajectory(messages)
+        trajectory = resolve_session_trajectory(messages, kwargs.get("session_id"))
         step = max(1, len(messages))
         request_index = sum(1 for m in messages if m.get("role") == "assistant")
         envelope = antigravity_request_envelope(
