@@ -59,3 +59,67 @@ def test_register_removal_step_returns_bool():
     # Must never raise: True when the core registry accepts the step,
     # False when the core removed the shim (add/list/status unaffected).
     assert _register_removal_step() in (True, False)
+
+
+def test_callback_uri_is_derived_from_the_listener_port():
+    """The registered redirect must match the port the listener actually binds.
+
+    Google has the redirect URI registered as a literal, so the two cannot drift:
+    the port is read from _CALLBACK_PORT rather than hardcoded a second time.
+    """
+    from auth import _CALLBACK_HOST, _CALLBACK_PORT, REDIRECT_URI
+
+    assert REDIRECT_URI == f"http://localhost:{_CALLBACK_PORT}/oauth-callback"
+    assert _CALLBACK_PORT == 51121, (
+        "the registered redirect URI pins this port; changing it needs a new OAuth client")
+    assert _CALLBACK_HOST == "127.0.0.1", "the callback must bind loopback only"
+
+
+def test_busy_callback_port_is_reported_with_its_reason():
+    """A busy port must be named instead of swallowed.
+
+    Two Hermes profiles can each trigger a login, and the second one used to lose
+    its callback silently: `except Exception: pass` swallowed EADDRINUSE and the
+    user was told the callback "did not work", sending them to the wrong fix. The
+    manual paste fallback still works, so it must be reached with the real reason
+    shown.
+    """
+    import errno
+    import io as _io
+    import socket
+    from contextlib import redirect_stdout
+
+    import auth as auth_mod
+
+    # Occupy the real port so HTTPServer raises the same EADDRINUSE a second
+    # concurrent login would.
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        blocker.bind((auth_mod._CALLBACK_HOST, auth_mod._CALLBACK_PORT))
+        blocker.listen(1)
+    except OSError:
+        blocker.close()
+        return  # port unavailable in this environment; nothing to assert
+
+    buffer = _io.StringIO()
+    from accounts import AntigravityAccountRegistry
+    manager = auth_mod.AntigravityAuthManager(
+        registry=AntigravityAccountRegistry(
+            registry_path=__import__('pathlib').Path(__import__('tempfile').mkdtemp()) / 'accounts.json'))
+    try:
+        with redirect_stdout(buffer), \
+                patch("webbrowser.open"), \
+                patch("builtins.input", side_effect=EOFError):
+            try:
+                manager.login_interactive()
+            except Exception:
+                pass  # a cancelled manual paste ends the login
+    finally:
+        blocker.close()
+
+    output = buffer.getvalue()
+    assert str(auth_mod._CALLBACK_PORT) in output, (
+        f"the taken port must be named in the message; got: {output!r}")
+    assert "deja utilise" in output or "deja utilisé" in output, (
+        f"the message must say the port is in use; got: {output!r}")

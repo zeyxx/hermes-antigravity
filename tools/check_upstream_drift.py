@@ -169,16 +169,23 @@ def read_port() -> dict[str, Any]:
         raise ExtractionError("SCOPES not found in auth.py")
     scopes = re.findall(r'"([^"]+)"', scopes_block.group(1))
 
+    # REDIRECT_URI is either a literal or derived from the callback port, since the
+    # listener's port is fixed by the redirect URI registered with Google.
     redirect = re.search(r'REDIRECT_URI = "([^"]+)"', auth_src)
     if not redirect:
-        raise ExtractionError("REDIRECT_URI not found in auth.py")
+        port = re.search(r"^_CALLBACK_PORT = (\d+)", auth_src, re.M)
+        if not port:
+            raise ExtractionError("REDIRECT_URI not found in auth.py")
+        redirect_value = f"http://localhost:{port.group(1)}/oauth-callback"
+    else:
+        redirect_value = redirect.group(1)
 
     return {
         "cli_version": version.group(1),
         "cli_build": build.group(1),
         "enums": enums,
         "scopes": scopes,
-        "redirect_uri": redirect.group(1),
+        "redirect_uri": redirect_value,
     }
 
 
