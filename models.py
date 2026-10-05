@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
 import urllib.request
 from typing import Any
+
+try:
+    from .accounts import HERMES_ROOT
+except ImportError:
+    from accounts import HERMES_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +168,114 @@ def stable_uuid(seed: str) -> str:
 _session_trajectory_map: dict[str, dict[str, str]] = {}
 
 
+# ── Model enums ────────────────────────────────────────────────────────────
+# The relay's `model_enum` wire label is the value it returns as `info.model` from
+# fetchAvailableModels. It is NOT derivable from the model id: gemini-3.8-flash-low
+# maps to MODEL_PLACEHOLDER_M320, not to the id with dashes replaced. Synthesising
+# one sends a value the relay does not recognise.
+#
+# Ported from pi-antigravity: a dynamic cache fed by discovery, persisted so a
+# cold start keeps the last-known-good values, with a static table for models that
+# discovery has not reported yet.
+
+MODEL_ENUM_STORE = HERMES_ROOT / "antigravity-model-enums.json"
+
+_STATIC_MODEL_ENUMS: dict[str, str] = {
+    # Gemini 3.8 Flash
+    "gemini-3.8-flash": "MODEL_PLACEHOLDER_M318",
+    "gemini-3.8-flash-high": "MODEL_PLACEHOLDER_M318",
+    "gemini-3.8-flash-medium": "MODEL_PLACEHOLDER_M319",
+    "gemini-3.8-flash-low": "MODEL_PLACEHOLDER_M320",
+    "gemini-3.8-flash-tiered": "MODEL_PLACEHOLDER_M322",
+    # Gemini 3.7 Flash
+    "gemini-3.7-flash": "MODEL_PLACEHOLDER_M298",
+    "gemini-3.7-flash-high": "MODEL_PLACEHOLDER_M298",
+    "gemini-3.7-flash-medium": "MODEL_PLACEHOLDER_M299",
+    "gemini-3.7-flash-low": "MODEL_PLACEHOLDER_M300",
+    "gemini-3.7-flash-tiered": "MODEL_PLACEHOLDER_M301",
+    # Gemini 3.6 Flash
+    "gemini-3.6-flash": "MODEL_PLACEHOLDER_M71",
+    "gemini-3.6-flash-high": "MODEL_PLACEHOLDER_M71",
+    "gemini-3.6-flash-medium": "MODEL_PLACEHOLDER_M72",
+    "gemini-3.6-flash-low": "MODEL_PLACEHOLDER_M73",
+    "gemini-3.6-flash-tiered": "MODEL_PLACEHOLDER_M196",
+    # Gemini 3.5 Flash
+    "gemini-3.5-flash": "MODEL_PLACEHOLDER_M20",
+    "gemini-3.5-flash-low": "MODEL_PLACEHOLDER_M20",
+    "gemini-3.5-flash-extra-low": "MODEL_PLACEHOLDER_M187",
+}
+
+_model_enum_cache: dict[str, str] = {}
+_model_enum_loaded = False
+
+
+def _load_model_enums() -> dict[str, str]:
+    """Restore persisted enums once per process; a corrupt store is ignored."""
+    global _model_enum_loaded
+    if _model_enum_loaded:
+        return _model_enum_cache
+    _model_enum_loaded = True
+    try:
+        raw = json.loads(MODEL_ENUM_STORE.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and raw.get("version") == 1:
+            enums = raw.get("enums")
+            if isinstance(enums, dict):
+                _model_enum_cache.update(
+                    {k: v for k, v in enums.items() if isinstance(v, str) and v}
+                )
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.debug("model enum store unreadable: %s", exc)
+    return _model_enum_cache
+
+
+def _save_model_enums() -> None:
+    try:
+        MODEL_ENUM_STORE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "enums": dict(_model_enum_cache)}
+        MODEL_ENUM_STORE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.chmod(MODEL_ENUM_STORE, 0o600)
+    except Exception as exc:
+        # Enums are an optimisation for scoring, not a credential; never fail a
+        # request because they could not be cached.
+        logger.debug("model enum store not written: %s", exc)
+
+
+def register_model_enum(wire_model_id: str, model_enum: str) -> None:
+    """Record one discovered enum, ahead of the static table."""
+    if not wire_model_id or not model_enum:
+        return
+    cache = _load_model_enums()
+    if cache.get(wire_model_id) == model_enum:
+        return
+    cache[wire_model_id] = model_enum
+    _save_model_enums()
+
+
+def register_discovered_model_enums(models: Any) -> None:
+    """Register every ``{wire_id: {"model": enum}}`` entry from a discovery payload."""
+    if not isinstance(models, dict):
+        return
+    for wire_id, info in models.items():
+        if isinstance(info, dict):
+            enum = info.get("model")
+            if isinstance(enum, str) and enum:
+                register_model_enum(wire_id, enum)
+
+
+def get_model_enum(wire_model_id: str) -> str | None:
+    """The enum for a wire model id, or None when it is genuinely unknown.
+
+    Returning None matters: the caller must omit the label rather than invent a
+    value, which is what the previous id-mangling fallback did.
+    """
+    direct = _load_model_enums().get(wire_model_id)
+    if direct:
+        return direct
+    return _STATIC_MODEL_ENUMS.get(wire_model_id)
+
+
 def resolve_session_trajectory(
     messages: list[dict], session_id: str | None = None
 ) -> dict[str, str]:
@@ -257,7 +371,13 @@ def fetch_available_models(
     timeout: float = 6.0,
     endpoints: list[str] | None = None,
 ) -> list[str]:
-    """Query v1internal:fetchAvailableModels across candidate endpoints."""
+    """Query v1internal:fetchAvailableModels across candidate endpoints.
+
+    Also records each model's enum (the relay's own ``info.model`` value), which is
+    the only authoritative source for the ``model_enum`` wire label. The ids alone
+    are not enough: the enum is not derivable from the model id, so a port that
+    keeps only the keys has to invent a value later.
+    """
     candidates = endpoints or ENDPOINT_FALLBACKS
     discovered: set[str] = set()
 
@@ -277,7 +397,15 @@ def fetch_available_models(
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 models_dict = data.get("models", {})
-                for m_id in models_dict.keys():
+                for m_id, info in models_dict.items():
+                    if not isinstance(info, dict):
+                        info = {}
+                    # Register every enum, before the picker filter: the id decides
+                    # what the user sees, the enum is what the relay scores, and a
+                    # filtered-out id can still be requested by a routing override.
+                    enum = info.get("model")
+                    if isinstance(enum, str) and enum:
+                        register_model_enum(m_id, enum)
                     if any(prefix in m_id for prefix in ("gemini-", "claude-", "gpt-oss-")):
                         discovered.add(m_id)
                 if discovered:
