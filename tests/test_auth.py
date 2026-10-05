@@ -123,3 +123,90 @@ def test_busy_callback_port_is_reported_with_its_reason():
         f"the taken port must be named in the message; got: {output!r}")
     assert "deja utilise" in output or "deja utilisé" in output, (
         f"the message must say the port is in use; got: {output!r}")
+
+
+def test_provider_declares_public_auth_hooks():
+    """The profile must carry auth_handler/refresh_credential, not private writes.
+
+    Catalog admission rule 9 refuses a plugin that rebinds Hermes core at
+    runtime, and `hermes plugins validate` enforces it statically. Declaring the
+    documented hooks on ProviderProfile is the supported seam.
+    """
+    import __init__ as plugin
+    from providers import get_provider_profile
+
+    profile = get_provider_profile("antigravity")
+    assert profile is not None
+    assert profile.auth_handler is not None, "auth_handler must be declared"
+    assert profile.refresh_credential is not None, "refresh_credential must be declared"
+    assert getattr(profile, "_oauth_auth_type", None) is None, (
+        "_oauth_auth_type is not read by any core release; drop it")
+    assert plugin.register_provider is not None
+
+
+def test_auth_handler_declines_actions_the_core_owns():
+    """Only `add` is ours; status/logout/refresh belong to the core for a mirrored plugin."""
+    from auth import antigravity_auth_handler
+
+    for action in ("status", "logout", "refresh", "unknown"):
+        assert antigravity_auth_handler(action, None) is False, (
+            f"{action} must fall through to the core path")
+
+
+def test_auth_handler_add_writes_one_pooled_row(monkeypatch=None):
+    """`hermes auth add antigravity` must fill the pool the status path reads."""
+    import sys
+    from unittest.mock import patch
+
+    import auth as auth_mod
+
+    calls = {}
+
+    class _Pool:
+        def __init__(self):
+            self.added = []
+
+        def entries(self):
+            return []
+
+        def add(self, label, source, token, fields):
+            calls["add"] = {"label": label, "source": source, "token": token, "fields": fields}
+
+        def save(self):
+            calls["saved"] = True
+
+    class _PoolModule:
+        @staticmethod
+        def load_pool(name):
+            calls["provider"] = name
+            return _Pool()
+
+    # stub the login: the handler must be exercised without a real browser flow
+    fake_login = {
+        "access_token": "ya29.test-token",
+        "refresh_token": "1//refresh",
+        "expires_at": 9e9,
+        "project_id": "proj-test",
+        "email": "titouan@example.com",
+    }
+    fake = type(sys)("agent.credential_pool")
+    fake.load_pool = _PoolModule.load_pool
+    agent_pkg = sys.modules.get("agent")
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    try:
+        with patch.object(auth_mod, "_antigravity_oauth_login", return_value=fake_login):
+            handled = auth_mod.antigravity_auth_handler("add", type("A", (), {"label": None})())
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
+
+    assert handled is True
+    assert calls.get("provider") == "antigravity"
+    assert calls["add"]["source"] == "manual:antigravity_pkce"
+    assert calls["add"]["token"]
+    assert calls.get("saved") is True
+    assert "titouan@example.com" in calls["add"]["label"], (
+        "the pool row must be labelled with the account that signed in")

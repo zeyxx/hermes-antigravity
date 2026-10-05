@@ -77,7 +77,7 @@ if [ -d "$DEST/.git" ]; then
   ahead=""
   if [ -n "$upstream_ref" ]; then
     ahead="$(git -C "$DEST" log --oneline "$upstream_ref..HEAD" 2>/dev/null || true)"
-    if [ -n "$ahead" ]; then
+    if [ -n "$ahead" ] && [ "$FORCE" -eq 0 ]; then
       echo
       echo "REFUSING: the installed plugin ($head_branch) has $(echo "$ahead" | wc -l | tr -d ' ') commit(s) not in $upstream_ref:"
       echo "$ahead" | sed 's/^/  /'
