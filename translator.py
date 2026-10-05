@@ -4,6 +4,7 @@ Adapted from Rahul Arya's pi-antigravity (https://github.com/Rahularya01/pi-anti
 for the Hermes Agent Python runtime.
 """
 import json
+import re
 import uuid
 from typing import Any
 try:
@@ -12,6 +13,35 @@ except ImportError:
     from models import get_thinking_config
 
 _THOUGHT_SIGNATURES: dict[str, str] = {}
+
+# Unpaired surrogates (a lone high/low surrogate from a truncated emoji) cannot be
+# encoded as UTF-8: json.dumps(...).encode("utf-8") raises UnicodeEncodeError and the
+# whole request dies. Replace only the unpaired halves with U+FFFD so valid astral
+# characters (emoji) survive untouched. Ported from pi-antigravity sanitizeText.
+_UNPAIRED_SURROGATES = re.compile(
+    "(?:[\ud800-\udbff](?![\udc00-\udfff]))|(?:(?<![\ud800-\udbff])[\udc00-\udfff])"
+)
+
+
+def sanitize_text(value: Any) -> str:
+    """Return ``value`` as a string safe to UTF-8 encode."""
+    text = "" if value is None else str(value)
+    well_formed = getattr(text, "to_well_formed", None)
+    if callable(well_formed):  # Python 3.11+, exact equivalent of toWellFormed()
+        return well_formed()
+    return _UNPAIRED_SURROGATES.sub("\ufffd", text)
+
+
+def _to_well_formed(value: Any) -> Any:
+    """Recursively repair unpaired surrogates in strings nested in dicts/lists."""
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, dict):
+        return {_to_well_formed(k): _to_well_formed(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_well_formed(item) for item in value]
+    return value
+
 
 _UNSUPPORTED_SCHEMA_KEYS = frozenset({
     "anyOf", "oneOf", "allOf", "not", "if", "then", "else",
