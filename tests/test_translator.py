@@ -99,9 +99,9 @@ def test_unsigned_tool_call_falls_back_to_text_observation():
         project_id="proj-test",
     )
     contents = payload["request"]["contents"]
-    assert len(contents) == 2
-    assert "[Action: invoked read_file" in contents[0]["parts"][0]["text"]
-    assert "[Observation from read_file" in contents[1]["parts"][0]["text"]
+    assert len(contents) == 3
+    assert "[Action: invoked read_file" in contents[1]["parts"][0]["text"]
+    assert "[Observation from read_file" in contents[2]["parts"][0]["text"]
 
 def test_parse_sse_event_text_and_thinking():
     data = {
@@ -239,7 +239,7 @@ def test_claude_function_call_includes_id():
         messages=messages,
         project_id="proj-test",
     )
-    fc = payload["request"]["contents"][0]["parts"][0]["functionCall"]
+    fc = payload["request"]["contents"][1]["parts"][0]["functionCall"]
     assert "id" in fc, "Claude functionCall must include id"
     assert fc["id"] == "toolu_abc123"
 
@@ -266,7 +266,7 @@ def test_claude_function_response_includes_id():
         messages=messages,
         project_id="proj-test",
     )
-    fr = payload["request"]["contents"][1]["parts"][0]["functionResponse"]
+    fr = payload["request"]["contents"][2]["parts"][0]["functionResponse"]
     assert "id" in fr, "Claude functionResponse must include id"
     assert fr["id"] == "toolu_abc123"
 
@@ -311,3 +311,33 @@ def test_tool_declaration_schema_is_sanitized():
     params = payload["request"]["tools"][0]["functionDeclarations"][0]["parameters"]
     assert "anyOf" not in params["properties"]["notify"]
     assert "allOf" not in params
+
+
+def test_contents_strictly_alternate_and_start_with_user():
+    """Gemini 400 guard: no consecutive same-role contents, user first.
+
+    Regression for 'function call turn comes immediately after a user
+    turn or after a function response turn' on long Hermes histories
+    (fan-out tool messages, compaction notes, interruption markers).
+    """
+    _THOUGHT_SIGNATURES["__last__"] = "sig-regression"
+    try:
+        messages = [
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"id": "c1", "type": "function",
+                             "function": {"name": "patch", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "ok1"},
+            {"role": "tool", "tool_call_id": "c1", "content": "ok2"},
+            {"role": "assistant", "content": "[response interrupted]"},
+            {"role": "user", "content": "[Context from interrupted response]"},
+            {"role": "user", "content": "[Note: model was just switched]"},
+        ]
+        payload = to_antigravity_payload(
+            model="gemini-3.8-flash-low", messages=messages, project_id="p")
+    finally:
+        _THOUGHT_SIGNATURES.pop("__last__", None)
+    contents = payload["request"]["contents"]
+    assert contents[0]["role"] == "user"
+    for i in range(len(contents) - 1):
+        assert contents[i]["role"] != contents[i + 1]["role"], (
+            f"consecutive {contents[i]['role']} at index {i}")

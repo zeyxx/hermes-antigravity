@@ -267,6 +267,27 @@ def to_antigravity_payload(
                         ],
                     }
                 )
+    # Gemini INVALID_ARGUMENT guard: contents must strictly alternate
+    # user/model, one functionResponse turn per assistant turn, and start
+    # with a user turn. Hermes histories violate this whenever: (a) one
+    # assistant turn fans out to N tool messages (N consecutive user
+    # contents), (b) compaction/interruption injects back-to-back assistant
+    # or user notes, (c) history starts with an assistant turn (system
+    # prompt lives in systemInstruction, so contents[0] was model).
+    # Merge consecutive same-role contents into a single turn so N
+    # functionResponses share one user turn and ordering stays valid.
+    merged: list[dict[str, Any]] = []
+    for entry in contents:
+        if not entry.get("parts"):
+            continue
+        if merged and merged[-1]["role"] == entry["role"]:
+            merged[-1]["parts"].extend(entry["parts"])
+        else:
+            merged.append({"role": entry["role"], "parts": list(entry["parts"])})
+    contents = merged
+    if contents and contents[0]["role"] != "user":
+        contents.insert(0, {"role": "user", "parts": [{"text": "[Conversation start]"}]})
+
     request_body: dict[str, Any] = {"contents": contents}
 
     if system_parts:
