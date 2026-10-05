@@ -97,7 +97,8 @@ is the whole reason this file exists.
 
 ```bash
 # the port side is asserted; a red test means upstream moved or someone edited a value here
-python3 -m pytest tests/test_models.py -k "wire or fingerprint or cli_version"
+export PYTHONPATH=".:$HOME/.hermes/hermes-agent"
+python3 tools/run_tests.py --min-tests "$(python3 tools/run_tests.py --collect-only)"
 ```
 
 Tested against **pi-antigravity 0.9.0** (`a3d8cab`, 2026-09-30).

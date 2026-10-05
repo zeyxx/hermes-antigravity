@@ -242,10 +242,17 @@ model:
 
 ## 🧪 Tests
 
-Run the full suite (65 unit and integration tests):
+Run the full suite (currently 96 tests — confirm with `--collect-only`, a module
+that fails to import drops its tests silently):
+
 ```bash
-pytest tests/ -v
+export PYTHONPATH=".:$HOME/.hermes/hermes-agent"   # the plugin imports `providers` from the Hermes core
+python3 tools/run_tests.py --collect-only
+python3 tools/run_tests.py --min-tests "$(python3 tools/run_tests.py --collect-only)"
 ```
+
+No pytest, no dependencies: the runner is standard library only (see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor workflow).
 
 ---
 

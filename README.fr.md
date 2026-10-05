@@ -260,10 +260,16 @@ model:
 
 ## 🧪 Tests
 
-Pour exécuter l'ensemble des 65 tests unitaires et d'intégration :
+Pour exécuter l'ensemble des tests (96 actuellement — vérifiez avec
+`--collect-only`, un module qui ne s'importe pas perd ses tests en silence) :
 ```bash
-pytest tests/ -v
+export PYTHONPATH=".:$HOME/.hermes/hermes-agent"   # le plugin importe `providers` depuis le cœur Hermes
+python3 tools/run_tests.py --collect-only
+python3 tools/run_tests.py --min-tests "$(python3 tools/run_tests.py --collect-only)"
 ```
+
+Ni pytest, ni dépendances : le lanceur n'utilise que la bibliothèque standard
+(voir [`CONTRIBUTING.md`](CONTRIBUTING.md) pour le parcours contributeur complet).
 
 ---
 
