@@ -15,7 +15,8 @@ A native inference provider plugin integrating **Google Antigravity / Cloud Code
 Google does **not** provide API keys for consumer or student subscriptions (Gemini Pro Student, Gemini Advanced, Google One AI Premium, Google Workspace for Education). Historically, Hermes Agent could only connect to Google via Google AI Studio API keys (`GOOGLE_API_KEY`) or Vertex AI service accounts, leaving subscription holders unable to use their quota.
 
 This plugin solves that problem: it authenticates directly with your Google account via OAuth 2.0 PKCE, unlocking your subscription models in Hermes Agent without burning paid API tokens!
-This plugin is a Python port of the proven `pi-antigravity` extension for the Pi Coding Agent — same wire protocol, same model routing, same session envelope, re-architected as a native Hermes `ProviderProfile`. See Acknowledgements & Provenance below.
+
+**Base project & provenance:** this plugin is a Python adaptation of the [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) extension for the Pi Coding Agent by Rahul Arya ([@Rahularya01](https://github.com/Rahularya01)), re-architected as a native Hermes `ProviderProfile`. **It is not a fork of the Pi repository** — it reimplements the same wire protocol, model routing, session envelope, tool-schema stripping, thought-signature handling, and SSE streaming against the documented Antigravity behaviour. Every wire constant is tracked in [`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md) so divergence from the reference implementation is visible rather than silent. See [Acknowledgements & Provenance](#-acknowledgements--provenance).
 
 
 ## 🏗️ Architecture
@@ -164,6 +165,40 @@ Signing in requests these Google OAuth scopes:
 | `experimentsandconfigs` | Server-side experiment and config flags for the API |
 
 Review these permissions before approving access. If credentials expire or are revoked, run `hermes model` again and re-select Google Antigravity.
+
+### 5. Multiple Hermes profiles
+
+Plugin discovery is per profile. If you run Hermes with more than one profile
+(`hermes -p <profile> ...`, or a `HERMES_HOME` override), link the plugin into each one:
+
+```bash
+for profile in work personal; do
+  mkdir -p ~/.hermes/profiles/$profile/plugins/model-providers
+  ln -s ~/.hermes/plugins/model-providers/antigravity \
+          ~/.hermes/profiles/$profile/plugins/model-providers/antigravity
+done
+```
+
+**Each profile keeps its own accounts.** The account registry resolves through the
+profile's own `HERMES_HOME`, so credentials never leak between profiles. Sign in once per
+profile:
+
+```bash
+hermes -p work model     # then select Google Antigravity
+hermes -p personal model # then select Google Antigravity
+```
+
+If you *want* one set of Google accounts across profiles, symlink the registry instead of
+logging in twice — it is a single JSON file, `chmod 600`:
+
+```bash
+ln -s ~/.hermes/antigravity-accounts.json ~/.hermes/profiles/work/antigravity-accounts.json
+```
+
+> Before v1.1.2 every profile shared `~/.hermes/antigravity-accounts.json` because the
+> path was hardcoded rather than resolved through `HERMES_HOME`. That looked like working
+> sharing and would have broken the other way the moment the core honoured the variable.
+> Profiles are now isolated by default.
 
 ---
 
