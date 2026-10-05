@@ -12,3 +12,4 @@ build/
 credentials*.json
 .env*
 *.db
+.drift-cache/

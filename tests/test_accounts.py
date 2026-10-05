@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from accounts import (
     AccountRecord,
@@ -481,6 +480,27 @@ def test_next_untried_account_skips_account_without_usable_token():
     assert nxt.email == "live@x.com"
 
 
+def _reload_hermes_modules():
+    """Re-import accounts/auth/models under the current HERMES_HOME.
+
+    importlib.reload() cannot be used: Hermes' plugin loader executes plugin code
+    through runpy, so a reloaded module has no import spec and reload raises
+    "spec not found". Dropping the modules and importing them again does the same
+    job without needing one.
+    """
+    import importlib
+    import sys
+
+    # `models` is left in sys.modules on purpose: other test modules hold a direct
+    # reference to it, and re-importing it here would leave those references bound
+    # to a stale object while their tests mutate the fresh one.
+    for name in ("accounts", "auth"):
+        sys.modules.pop(name, None)
+    accounts = importlib.import_module("accounts")
+    auth = importlib.import_module("auth")
+    return accounts, auth
+
+
 def test_registry_paths_follow_hermes_home():
     """A profile must keep its accounts with the rest of that profile.
 
@@ -489,24 +509,26 @@ def test_registry_paths_follow_hermes_home():
     always there — and would have broken the moment the core honoured
     HERMES_HOME for real.
     """
-    import importlib
     import os
     from pathlib import Path
     import tempfile
 
-    sandbox = Path(tempfile.mkdtemp())
+    # Must NOT live under ~/.hermes: get_default_hermes_root() folds any path there
+    # back to the root, so a sandbox inside it would silently resolve to ~/.hermes
+    # and the assertion would be testing nothing.
+    sandbox = Path(tempfile.mkdtemp(dir="/tmp"))
+    sandbox = Path(str(sandbox).replace("/tmp/", "/tmp/hermes-home-test-", 1))
+    sandbox.mkdir(parents=True, exist_ok=True)
     previous = os.environ.get("HERMES_HOME")
     os.environ["HERMES_HOME"] = str(sandbox)
     try:
-        accounts = importlib.reload(importlib.import_module("accounts"))
+        accounts, auth = _reload_hermes_modules()
         # resolved live from the environment, not re-read from a hardcoded constant
-        assert accounts._hermes_home() == sandbox
         assert accounts.HERMES_ROOT == accounts._hermes_home()
         assert accounts.HERMES_ROOT == sandbox
         assert accounts.DEFAULT_REGISTRY_PATH == sandbox / "antigravity-accounts.json"
         assert accounts.LEGACY_CACHE_FILE == sandbox / "antigravity-auth.json"
 
-        auth = importlib.reload(importlib.import_module("auth"))
         assert auth.LEGACY_CACHE_FILE == sandbox / "antigravity-auth.json", (
             "auth.py must share the same HERMES_HOME resolution as accounts.py")
     finally:
@@ -514,30 +536,39 @@ def test_registry_paths_follow_hermes_home():
             os.environ.pop("HERMES_HOME", None)
         else:
             os.environ["HERMES_HOME"] = previous
-        importlib.reload(importlib.import_module("accounts"))
-        importlib.reload(importlib.import_module("auth"))
+        _reload_hermes_modules()
 
 
 def test_two_hermes_homes_have_separate_registries():
-    """Distinct profiles must not share an account store."""
-    import importlib
+    """Two distinct Hermes homes must not share an account store.
+
+    Note this is about distinct ROOTS, not profiles. The core deliberately folds
+    ~/.hermes/profiles/<name> back to ~/.hermes, so profiles share one root by
+    design; what must not happen is two separate roots colliding.
+    """
     import os
     from pathlib import Path
     import tempfile
+
+    def root_for(name):
+        # deliberately outside ~/.hermes: the core normalises anything under it
+        root = Path(tempfile.mkdtemp(dir="/tmp")) / f"hermes-home-test-{name}"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     def registry_for(root):
         previous = os.environ.get("HERMES_HOME")
         os.environ["HERMES_HOME"] = str(root)
         try:
-            accounts = importlib.reload(importlib.import_module("accounts"))
+            accounts, _ = _reload_hermes_modules()
             return accounts.DEFAULT_REGISTRY_PATH
         finally:
             if previous is None:
                 os.environ.pop("HERMES_HOME", None)
             else:
                 os.environ["HERMES_HOME"] = previous
-            importlib.reload(importlib.import_module("accounts"))
+            _reload_hermes_modules()
 
-    a = registry_for(Path(tempfile.mkdtemp()) / "profile-a")
-    b = registry_for(Path(tempfile.mkdtemp()) / "profile-b")
-    assert a != b
+    a = registry_for(root_for("alpha"))
+    b = registry_for(root_for("beta"))
+    assert a != b, f"two Hermes roots resolved to the same registry: {a}"
