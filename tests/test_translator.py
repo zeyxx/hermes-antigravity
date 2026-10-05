@@ -3,6 +3,8 @@ from translator import (
     to_antigravity_payload,
     parse_sse_event,
     _THOUGHT_SIGNATURES,
+    _to_well_formed,
+    sanitize_text,
 )
 
 def test_to_antigravity_payload_messages_and_tools():
@@ -341,3 +343,32 @@ def test_contents_strictly_alternate_and_start_with_user():
     for i in range(len(contents) - 1):
         assert contents[i]["role"] != contents[i + 1]["role"], (
             f"consecutive {contents[i]['role']} at index {i}")
+
+
+def test_sanitize_text_replaces_unpaired_surrogate():
+    """A lone surrogate cannot be UTF-8 encoded and would kill the request."""
+    lone_high = "deploy \ud83d now"
+    lone_low = "deploy \ude00 now"
+    assert sanitize_text(lone_high).encode("utf-8").decode("utf-8") is not None
+    assert "�" in sanitize_text(lone_high)
+    assert "�" in sanitize_text(lone_low)
+
+
+def test_sanitize_text_preserves_valid_astral_characters():
+    """Regression: a naive U+FFFD sweep corrupted valid emoji (#66/#67 upstream)."""
+    text = "ship it \U0001F600 with \u2615 and caf\u00e9"
+    assert sanitize_text(text) == text
+    assert "\U0001F600" in sanitize_text(text)
+
+
+def test_to_well_formed_recurses_into_payload():
+    payload = {
+        "request": {"contents": [{"role": "user", "parts": [{"text": "hi \ud83d"}]}]},
+        "tools": [{"name": "x", "description": "y \ud83d"}],
+    }
+    repaired = _to_well_formed(payload)
+    encoded = json.dumps(repaired).encode("utf-8")  # must not raise
+    # json.dumps escapes U+FFFD as the literal six-char sequence, so assert on it
+    assert "\\ufffd" in encoded.decode("utf-8")
+    # non-string leaves are untouched
+    assert repaired["tools"][0]["name"] == "x"

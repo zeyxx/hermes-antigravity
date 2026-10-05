@@ -21,7 +21,7 @@ try:
         resolve_session_trajectory,
         antigravity_request_envelope,
     )
-    from .translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
+    from .translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk, _to_well_formed
 except ImportError:
     from auth import AntigravityAuthManager
     from models import (
@@ -32,7 +32,7 @@ except ImportError:
         resolve_session_trajectory,
         antigravity_request_envelope,
     )
-    from translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk
+    from translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk, _to_well_formed
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class AntigravityClient:
             request_id=envelope["requestId"],
         )
 
-        body_bytes = json.dumps(payload).encode("utf-8")
+        body_bytes = json.dumps(_to_well_formed(payload)).encode("utf-8")
 
         response = None
         last_error = None
