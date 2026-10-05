@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-REDIRECT_URI = "http://localhost:51121/oauth-callback"
+# The loopback callback listener. Fixed port and host because REDIRECT_URI is
+# registered with Google as exactly this URL — the registered redirect cannot be
+# changed at runtime. pi-antigravity uses the same 51121.
+_CALLBACK_HOST = "127.0.0.1"
+_CALLBACK_PORT = 51121
+REDIRECT_URI = f"http://localhost:{_CALLBACK_PORT}/oauth-callback"
 
 # Default Google Antigravity Desktop Client Credentials (split base64 to avoid static scanner false positives)
 DEFAULT_CLIENT_ID = os.environ.get("ANTIGRAVITY_CLIENT_ID") or base64.b64decode(
@@ -351,18 +356,42 @@ class AntigravityAuthManager:
 
         # Try starting local server
         auth_code = None
+        callback_error = None
         try:
-            server = HTTPServer(("127.0.0.1", 51121), _OAuthCallbackHandler)
+            server = HTTPServer((_CALLBACK_HOST, _CALLBACK_PORT), _OAuthCallbackHandler)
             server.timeout = 120.0
             server.handle_request()
             if _OAuthCallbackHandler.auth_code:
                 auth_code = _OAuthCallbackHandler.auth_code
             server.server_close()
-        except Exception:
-            pass
+        except OSError as exc:
+            # Most commonly another Hermes profile is mid-login on the same fixed
+            # port. Say so, instead of reporting a generic callback failure: the
+            # fallback below still works, but only if the user is told why.
+            callback_error = exc
+        except Exception as exc:  # pragma: no cover - defensive
+            callback_error = exc
+
+        if callback_error is not None:
+            port_taken = isinstance(callback_error, OSError) and getattr(
+                callback_error, "errno", None
+            ) in (48, 98, 10048)  # EADDRINUSE on linux / macOS / windows
+            if port_taken:
+                print(
+                    f"\nLe port {_CALLBACK_PORT} est deja utilise par un autre "
+                    "processus (probablement une autre session de connexion en cours)."
+                )
+                print("Fermez-la, ou collez l'URL de redirection ci-dessous.")
+            else:
+                print(
+                    "\nLe callback automatique n'a pas pu demarrer "
+                    f"({callback_error})."
+                )
+                print("Collez l'URL de redirection ci-dessous.")
 
         if not auth_code:
-            print("\nLe callback automatique n'a pas fonctionne.")
+            if callback_error is None:
+                print("\nLe callback automatique n'a pas fonctionne.")
             print("Copiez l'URL complete de redirection du navigateur et collez-la ici.")
             print("Ou collez directement le code d'autorisation.\n")
             try:
