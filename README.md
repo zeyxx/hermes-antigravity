@@ -123,6 +123,35 @@ python3 ~/.hermes/plugins/model-providers/antigravity/auth.py
 - `ANTIGRAVITY_REFRESH_TOKEN`: Google OAuth refresh token.
 - `ANTIGRAVITY_PROJECT_ID`: Google Cloud Code Assist project ID.
 - `ANTIGRAVITY_BASE_URL`: Optional inference endpoint override.
+- `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET`: use your own Google OAuth client instead of the bundled default.
+
+### 4. Credential safety
+
+**The default OAuth client is Google's *public* Antigravity desktop client, not a private app secret.**
+
+A desktop "installed app" OAuth client cannot keep a secret: the binary ships with it, so the value is inherently public and its only protection is that Google treats it as non-confidential. This plugin embeds the same public client identifier used by the official Antigravity Desktop app, byte-identical to [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) (MIT), which reverse-engineered it from the official CLI.
+
+That is different from an API secret, and it is why secret scanners may flag it:
+
+- **The embedded value is public by design.** It grants no access on its own — a token exchange still requires an interactive Google sign-in by the account owner.
+- **The credentials that *are* sensitive are the tokens, and they are never in this repository.** `ANTIGRAVITY_REFRESH_TOKEN` is a live account credential: keep it out of source control, issues and chat logs.
+- **Do not commit real tokens.** Stored accounts live in `~/.hermes/antigravity-accounts.json`, which must stay owner-only (`chmod 600`).
+- **Prefer your own client for anything sensitive.** Set `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET` if you want your own quota, audit trail and revocation surface.
+
+If a scanner blocks a push here, read this section before dismissing it: confirm the flagged value is the embedded *public desktop client*, not a user token. A blocked push is worth understanding rather than force-pushing past.
+
+Signing in requests these Google OAuth scopes:
+
+<!-- prettier-ignore -->
+| Scope | Why it's needed |
+| --- | --- |
+| `aicode` | Access to the Cloud Code Assist / Antigravity model catalog and endpoints |
+| `cloud-platform` | General Cloud Code Assist API access |
+| `userinfo.email`, `userinfo.profile` | Identify the signed-in Google account |
+| `cclog` | Cloud Code Assist logging/telemetry endpoints used by the API |
+| `experimentsandconfigs` | Server-side experiment and config flags for the API |
+
+Review these permissions before approving access. If credentials expire or are revoked, run `hermes model` again and re-select Google Antigravity.
 
 ---
 
