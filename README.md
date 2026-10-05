@@ -99,6 +99,20 @@ Clone this repository into your Hermes model providers plugin directory:
 git clone https://github.com/zeyxx/hermes-antigravity ~/.hermes/plugins/model-providers/antigravity
 ```
 
+**Upgrading an existing install:** do not `cp` over it. The installed plugin is itself a
+git clone and can hold commits or edits that exist nowhere else; a plain copy destroys
+them with no diff and no error. Use the guarded sync instead:
+
+```bash
+./tools/sync-installed.sh --dry-run   # report what would change, write nothing
+./tools/sync-installed.sh             # sync, refusing if the installed copy has local work
+```
+
+It refuses when the installed tree is dirty, when it has commits missing from its own
+upstream, or when it sits at an unexpected revision — so work that exists only on that
+machine becomes a loud failure instead of a silent loss. `--force` overrides, and the
+message tells you what you would be discarding.
+
 **Windows (PowerShell):**
 ```powershell
 git clone https://github.com/zeyxx/hermes-antigravity "$env:USERPROFILE\.hermes\plugins\model-providers\antigravity"
