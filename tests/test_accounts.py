@@ -479,3 +479,65 @@ def test_next_untried_account_skips_account_without_usable_token():
     nxt = reg.next_untried_account()
     assert nxt is not None
     assert nxt.email == "live@x.com"
+
+
+def test_registry_paths_follow_hermes_home():
+    """A profile must keep its accounts with the rest of that profile.
+
+    The registry used to be hardcoded to ~/.hermes, so every Hermes profile
+    silently shared one account store. It looked correct — the accounts were
+    always there — and would have broken the moment the core honoured
+    HERMES_HOME for real.
+    """
+    import importlib
+    import os
+    from pathlib import Path
+    import tempfile
+
+    sandbox = Path(tempfile.mkdtemp())
+    previous = os.environ.get("HERMES_HOME")
+    os.environ["HERMES_HOME"] = str(sandbox)
+    try:
+        accounts = importlib.reload(importlib.import_module("accounts"))
+        # resolved live from the environment, not re-read from a hardcoded constant
+        assert accounts._hermes_home() == sandbox
+        assert accounts.HERMES_ROOT == accounts._hermes_home()
+        assert accounts.HERMES_ROOT == sandbox
+        assert accounts.DEFAULT_REGISTRY_PATH == sandbox / "antigravity-accounts.json"
+        assert accounts.LEGACY_CACHE_FILE == sandbox / "antigravity-auth.json"
+
+        auth = importlib.reload(importlib.import_module("auth"))
+        assert auth.LEGACY_CACHE_FILE == sandbox / "antigravity-auth.json", (
+            "auth.py must share the same HERMES_HOME resolution as accounts.py")
+    finally:
+        if previous is None:
+            os.environ.pop("HERMES_HOME", None)
+        else:
+            os.environ["HERMES_HOME"] = previous
+        importlib.reload(importlib.import_module("accounts"))
+        importlib.reload(importlib.import_module("auth"))
+
+
+def test_two_hermes_homes_have_separate_registries():
+    """Distinct profiles must not share an account store."""
+    import importlib
+    import os
+    from pathlib import Path
+    import tempfile
+
+    def registry_for(root):
+        previous = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = str(root)
+        try:
+            accounts = importlib.reload(importlib.import_module("accounts"))
+            return accounts.DEFAULT_REGISTRY_PATH
+        finally:
+            if previous is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = previous
+            importlib.reload(importlib.import_module("accounts"))
+
+    a = registry_for(Path(tempfile.mkdtemp()) / "profile-a")
+    b = registry_for(Path(tempfile.mkdtemp()) / "profile-b")
+    assert a != b

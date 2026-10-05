@@ -50,7 +50,10 @@ SCOPES = [
 ]
 
 # Legacy paths (kept for migration only)
-LEGACY_CACHE_FILE = Path.home() / ".hermes" / "antigravity-auth.json"
+try:
+    from .accounts import LEGACY_CACHE_FILE
+except ImportError:
+    from accounts import LEGACY_CACHE_FILE
 
 try:
     from .accounts import AntigravityAccountRegistry, AccountRecord, DEFAULT_REGISTRY_PATH
