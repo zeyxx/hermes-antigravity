@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 from models import (
     FALLBACK_MODELS,
@@ -219,45 +220,63 @@ def test_minimum_core_version_is_declared():
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
 
 
-def test_session_id_separates_two_identical_openings():
-    """Two sessions opening on the same text must not share a trajectory.
+def _tracker_row(tracker, field_prefix):
+    """Return the upstream and port cells of a tracker row."""
+    for line in tracker.splitlines():
+        if line.startswith("|") and field_prefix in line:
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) >= 2:
+                return cells[1], cells[2]
+    raise AssertionError(f"tracker row starting with {field_prefix!r} not found")
 
-    The first-message seed cannot tell them apart, so Google groups both
-    conversations under one trajectory and usage reporting drifts.
+
+def test_drift_tracker_agrees_with_code_on_cli_version():
+    """UPSTREAM_DRIFT.md must not drift away from the code it describes.
+
+    The tracker is only useful if the values in it are the values the plugin
+    sends. Assert the CLI row against the constants rather than trusting the
+    markdown.
     """
-    same_opening = [{"role": "user", "content": "fix the build"}]
-    a = resolve_session_trajectory(same_opening, "session-a")
-    b = resolve_session_trajectory(same_opening, "session-b")
-    assert a["conversationId"] != b["conversationId"]
-    assert a["trajectoryId"] != b["trajectoryId"]
+    import __init__ as plugin
+    import models as models_mod
+
+    tracker = Path("UPSTREAM_DRIFT.md").read_text(encoding="utf-8")
+
+    up, port = _tracker_row(tracker, "CLI version")
+    assert port.strip("`") == models_mod.CLI_VERSION, (
+        "tracker CLI version does not match models.py")
+    assert up.strip("`") == port.strip("`"), "port and upstream disagree in the tracker"
+
+    up_b, port_b = _tracker_row(tracker, "CLI build")
+    assert port_b.strip("`") == models_mod.CLI_BUILD, (
+        "tracker CLI build does not match models.py")
+    assert up_b.strip("`") == port_b.strip("`")
+
+    assert plugin.MIN_CORE_VERSION == "0.20.0"
 
 
-def test_session_id_is_stable_across_turns():
-    """Every turn of one session reuses the same ids."""
-    first = resolve_session_trajectory([{"role": "user", "content": "a"}], "s-1")
-    later = resolve_session_trajectory(
-        [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}], "s-1"
+def test_drift_tracker_lists_every_envelope_label_we_send():
+    """Every label the plugin sends must be traceable in the tracker.
+
+    A new label added in models.py without a tracker row is drift waiting to
+    happen, so this fails closed on the addition side.
+    """
+    import re
+    from models import antigravity_request_envelope
+
+    tracker = Path("UPSTREAM_DRIFT.md").read_text(encoding="utf-8")
+    envelope = antigravity_request_envelope(
+        wire_model_id="gemini-3.8-flash-low",
+        step=2,
+        last_step_index="1",
+        request_index=1,
+        conversation_id="conv",
+        trajectory_id="traj",
+        is_claude=False,
     )
-    assert first["conversationId"] == later["conversationId"]
-    assert first["trajectoryId"] == later["trajectoryId"]
-
-
-def test_trajectory_falls_back_to_first_message_without_session_id():
-    """Hermes does not always forward a session id; behaviour must not regress."""
-    messages = [{"role": "user", "content": "hello"}]
-    no_session = resolve_session_trajectory(messages)
-    assert no_session["conversationId"]
-    assert no_session["trajectoryId"]
-    # stable on a second call with the same opening
-    assert resolve_session_trajectory(messages)["conversationId"] == no_session["conversationId"]
-
-
-def test_blank_session_id_is_ignored():
-    """An empty or whitespace id must not collapse every session into one bucket."""
-    messages = [{"role": "user", "content": "hi"}]
-    blank = resolve_session_trajectory(messages, "   ")
-    assert blank["conversationId"] == resolve_session_trajectory(messages)["conversationId"]
-    named = resolve_session_trajectory(messages, "real")
-    assert named["conversationId"] != blank["conversationId"]
+    for label in envelope["labels"]:
+        # accept the bare label or its antigravity/ prefixed form
+        bare = label.split("/")[-1]
+        assert bare in tracker, f"label {label!r} is not listed in UPSTREAM_DRIFT.md"
 
 

@@ -208,6 +208,19 @@ This plugin uses Google's Cloud Code Assist endpoints (`cloudcode-pa.googleapis.
 
 ---
 
+## 🔄 Upstream drift
+
+This plugin is a port of [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity),
+which owns the wire protocol this plugin reimplements. Upstream moves; a port has no
+compiler to notice.
+
+**[`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md)** lists every wire field, its value on each side,
+and when it was last checked. Tests assert the port side, so an upstream bump shows up as a
+red test rather than a silent degradation — the failure mode behind every real incident in
+this plugin's history (a stale CLI fingerprint, a missing core hook).
+
+If you port something from upstream, update that file in the same PR.
+
 ## 🙏 Acknowledgements & Provenance
 
 This project stands on the shoulders of giants. In open-source software, provenance and proper attribution are fundamental to sustainable, ethical collaboration.
