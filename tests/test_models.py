@@ -280,3 +280,127 @@ def test_drift_tracker_lists_every_envelope_label_we_send():
         assert bare in tracker, f"label {label!r} is not listed in UPSTREAM_DRIFT.md"
 
 
+
+
+def _reset_model_enum_cache():
+    import models as models_mod
+    models_mod._model_enum_cache.clear()
+    models_mod._model_enum_loaded = False
+
+
+def test_model_enum_is_not_derived_from_the_model_id():
+    """The enum must come from discovery, never from mangling the id.
+
+    gemini-3.8-flash-low is MODEL_PLACEHOLDER_M320. The previous code sent
+    'gemini_3.8_flash_low', which the relay does not recognise.
+    """
+    from models import get_model_enum
+
+    enum = get_model_enum("gemini-3.8-flash-low")
+    assert enum == "MODEL_PLACEHOLDER_M320"
+    assert enum != "gemini_3.8_flash_low"
+
+
+def test_unknown_model_enum_is_none_not_invented():
+    """An unknown id must yield None so the caller omits the label."""
+    from models import get_model_enum
+
+    assert get_model_enum("totally-unknown-model") is None
+
+
+def test_discovered_enum_overrides_the_static_table():
+    """Discovery is authoritative when it reports a value the table lacks."""
+    import models as models_mod
+    from models import get_model_enum, register_model_enum
+
+    _reset_model_enum_cache()
+    original = models_mod.MODEL_ENUM_STORE
+    import tempfile
+    from pathlib import Path
+    models_mod.MODEL_ENUM_STORE = Path(tempfile.mkdtemp()) / "enums.json"
+    try:
+        register_model_enum("gemini-3.8-flash-low", "MODEL_PLACEHOLDER_CUSTOM")
+        assert get_model_enum("gemini-3.8-flash-low") == "MODEL_PLACEHOLDER_CUSTOM"
+    finally:
+        models_mod.MODEL_ENUM_STORE = original
+        _reset_model_enum_cache()
+
+
+def test_discovered_enums_survive_a_restart():
+    """A cold start must keep the last-known-good enums."""
+    import json as _json
+    import tempfile
+    from pathlib import Path
+    import models as models_mod
+
+    sandbox = Path(tempfile.mkdtemp())
+    original_store = models_mod.MODEL_ENUM_STORE
+    models_mod.MODEL_ENUM_STORE = sandbox / "antigravity-model-enums.json"
+    try:
+        models_mod.register_model_enum("gemini-9.9-ultra", "MODEL_PLACEHOLDER_X999")
+        assert models_mod.MODEL_ENUM_STORE.exists()
+
+        # simulate a fresh process: drop the in-memory cache, keep the file
+        models_mod._model_enum_cache.clear()
+        models_mod._model_enum_loaded = False
+
+        assert models_mod.get_model_enum("gemini-9.9-ultra") == "MODEL_PLACEHOLDER_X999"
+        stored = _json.loads(models_mod.MODEL_ENUM_STORE.read_text(encoding="utf-8"))
+        assert stored["version"] == 1
+        assert stored["enums"]["gemini-9.9-ultra"] == "MODEL_PLACEHOLDER_X999"
+    finally:
+        models_mod.MODEL_ENUM_STORE = original_store
+        _reset_model_enum_cache()
+
+
+def test_model_enum_store_is_owner_only():
+    """The store lives next to the account registry, so it must be private too."""
+    import stat
+    import tempfile
+    from pathlib import Path
+    import models as models_mod
+
+    sandbox = Path(tempfile.mkdtemp())
+    original_store = models_mod.MODEL_ENUM_STORE
+    models_mod.MODEL_ENUM_STORE = sandbox / "antigravity-model-enums.json"
+    try:
+        models_mod.register_model_enum("gemini-3.8-flash", "MODEL_PLACEHOLDER_M318")
+        mode = stat.S_IMODE(models_mod.MODEL_ENUM_STORE.stat().st_mode)
+        assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+    finally:
+        models_mod.MODEL_ENUM_STORE = original_store
+        _reset_model_enum_cache()
+
+
+def test_fetch_available_models_records_the_enum():
+    """Discovery must keep info.model, which the id-only loop used to drop."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    import io as _io
+    import json as _json
+    import models as models_mod
+
+    payload = {"models": {
+        "gemini-3.8-flash-low": {"model": "MODEL_PLACEHOLDER_M320", "name": "Gemini"},
+        "claude-sonnet-4-5": {"model": "MODEL_PLACEHOLDER_C45"},
+        "unrelated-model": {"model": "MODEL_PLACEHOLDER_U1"},
+    }}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return _json.dumps(payload).encode("utf-8")
+
+    _reset_model_enum_cache()
+    original_store = models_mod.MODEL_ENUM_STORE
+    models_mod.MODEL_ENUM_STORE = Path(tempfile.mkdtemp()) / "enums.json"
+    try:
+        with patch("urllib.request.urlopen", return_value=_Resp()):
+            models_mod.fetch_available_models("tok", "proj")
+        # enums are recorded even for ids the picker filters out
+        assert models_mod.get_model_enum("unrelated-model") == "MODEL_PLACEHOLDER_U1"
+        assert models_mod.get_model_enum("gemini-3.8-flash-low") == "MODEL_PLACEHOLDER_M320"
+    finally:
+        models_mod.MODEL_ENUM_STORE = original_store
+        _reset_model_enum_cache()
