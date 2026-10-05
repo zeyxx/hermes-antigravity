@@ -80,6 +80,18 @@ This plugin is a Python port of the proven `pi-antigravity` extension for the Pi
 
 ## 📦 Installation & Discovery
 
+### Requirements
+
+**Hermes Agent v0.20.0 or newer.** This plugin delivers inference through
+`ProviderProfile.create_client()`. On older cores that hook does not exist, so the
+provider still loads and still appears in `hermes model`, but every request fails with
+**HTTP 404** — the core quietly builds its own OpenAI-shaped client and POSTs it to the
+Antigravity API, which does not speak that shape.
+
+If requests 404 on a provider that looks correctly configured, check your core version
+before anything else. The plugin logs an explicit error at load time when the hook is
+missing.
+
 Clone this repository into your Hermes model providers plugin directory:
 
 **Linux & macOS:**
