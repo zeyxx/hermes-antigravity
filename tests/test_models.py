@@ -169,3 +169,50 @@ def test_fetch_available_models_empty_on_failure():
     with patch("urllib.request.urlopen", side_effect=Exception("network down")):
         models = fetch_available_models("fake-token", "fake-project")
         assert models == []
+
+
+def test_core_client_factory_contract_is_detected():
+    """The plugin is useless on a core without ProviderProfile.create_client.
+
+    Regression for #4: older cores ignore the hook, build their own OpenAI
+    client, and every turn 404s. The provider still shows up in `hermes model`,
+    so the symptom reads as a broken endpoint rather than an old core.
+    """
+    from providers.base import ProviderProfile
+    import __init__ as plugin
+
+    assert plugin._CORE_SUPPORTS_CLIENT_FACTORY == plugin._core_supports_client_factory()
+    assert plugin._core_supports_client_factory() == hasattr(
+        ProviderProfile, "create_client"
+    )
+
+
+def test_core_gate_is_evaluated_against_the_live_core():
+    """The gate reads the core it is loaded into, not a hardcoded assumption.
+
+    Removing the hook must make the same hasattr() expression report False.
+    The module-level constant is intentionally a snapshot taken at import,
+    so this asserts the expression rather than the constant.
+    """
+    from providers.base import ProviderProfile
+    import __init__ as plugin
+
+    original = ProviderProfile.__dict__.get("create_client")
+    try:
+        if original is not None:
+            del ProviderProfile.create_client
+        assert not hasattr(ProviderProfile, "create_client")
+        assert plugin._core_supports_client_factory() is False
+    finally:
+        if original is not None:
+            ProviderProfile.create_client = original
+    assert plugin._core_supports_client_factory() is True
+
+
+def test_minimum_core_version_is_declared():
+    """The floor is a single named constant so it can be cited, not guessed."""
+    import __init__ as plugin
+
+    assert plugin.MIN_CORE_VERSION == "0.20.0"
+    parts = plugin.MIN_CORE_VERSION.split(".")
+    assert len(parts) == 3 and all(p.isdigit() for p in parts)

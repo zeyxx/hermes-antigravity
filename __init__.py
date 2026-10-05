@@ -28,6 +28,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# The plugin delivers inference through ProviderProfile.create_client(). Without that
+# hook the core builds its own OpenAI-shaped client and POSTs it to
+# daily-cloudcode-pa.googleapis.com, which answers 404 for every turn: the provider
+# still appears in `hermes model`, so the failure looks like a broken endpoint rather
+# than an incompatible core. See https://github.com/zeyxx/hermes-antigravity/issues/4
+MIN_CORE_VERSION = "0.20.0"
+
+
+def _core_supports_client_factory() -> bool:
+    """True when this Hermes core routes inference through ProviderProfile.create_client."""
+    return hasattr(ProviderProfile, "create_client")
+
+
+# Snapshot taken at import time; the gate fires once, when the plugin loads.
+_CORE_SUPPORTS_CLIENT_FACTORY = _core_supports_client_factory()
+if not _CORE_SUPPORTS_CLIENT_FACTORY:
+    logger.error(
+        "hermes-antigravity requires Hermes core with ProviderProfile.create_client "
+        "(newer than v0.19.0, i.e. >= v%s). Please upgrade Hermes Agent."
+        % MIN_CORE_VERSION
+    )
+
 
 class AntigravityProfile(ProviderProfile):
     """Profile for Google Antigravity / Cloud Code Assist."""
