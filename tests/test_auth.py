@@ -125,6 +125,17 @@ def test_busy_callback_port_is_reported_with_its_reason():
         f"the message must say the port is in use; got: {output!r}")
 
 
+def test_callback_timeout_is_short_without_a_terminal():
+    """Catalog rule 12: unattended runs must fail fast, not wait out the callback window."""
+    import io
+    import sys
+    import auth as auth_mod
+
+    assert auth_mod._callback_timeout() == (120.0 if sys.stdin.isatty() else 5.0)
+    with patch("sys.stdin", io.StringIO()):
+        assert auth_mod._callback_timeout() == 5.0
+
+
 def test_provider_declares_public_auth_hooks():
     """The profile must carry auth_handler/refresh_credential, not private writes.
 

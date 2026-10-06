@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -36,6 +37,21 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 # changed at runtime. pi-antigravity uses the same 51121.
 _CALLBACK_HOST = "127.0.0.1"
 _CALLBACK_PORT = 51121
+
+
+def _callback_timeout() -> float:
+    """Seconds to wait for the loopback OAuth callback.
+
+    Interactive terminals get the full window: the user may still be signing
+    in in the browser. Unattended runs (cron, gateway, piped stdin) have no
+    browser and nobody to paste the fallback code, so waiting only delays an
+    inevitable failure — catalog rule 12 wants a clean, fast failure there.
+    """
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    return 120.0 if interactive else 5.0
 REDIRECT_URI = f"http://localhost:{_CALLBACK_PORT}/oauth-callback"
 
 # Default Google Antigravity Desktop Client Credentials (split base64 to avoid static scanner false positives)
@@ -361,7 +377,7 @@ class AntigravityAuthManager:
         callback_error = None
         try:
             server = HTTPServer((_CALLBACK_HOST, _CALLBACK_PORT), _OAuthCallbackHandler)
-            server.timeout = 120.0
+            server.timeout = _callback_timeout()
             server.handle_request()
             if _OAuthCallbackHandler.auth_code:
                 auth_code = _OAuthCallbackHandler.auth_code
