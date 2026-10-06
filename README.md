@@ -149,7 +149,6 @@ python3 ~/.hermes/plugins/model-providers/antigravity/auth.py
 - `ANTIGRAVITY_ACCESS_TOKEN`: Google Bearer access token.
 - `ANTIGRAVITY_REFRESH_TOKEN`: Google OAuth refresh token.
 - `ANTIGRAVITY_PROJECT_ID`: Google Cloud Code Assist project ID.
-- `ANTIGRAVITY_BASE_URL`: Optional inference endpoint override.
 - `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET`: use your own Google OAuth client instead of the bundled default.
 
 ### 4. Credential safety

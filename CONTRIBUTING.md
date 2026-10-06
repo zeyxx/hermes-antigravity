@@ -51,6 +51,13 @@ Before opening a PR, all three must be green:
 python3 tools/run_tests.py --collect-only
 python3 tools/run_tests.py --min-tests "$(python3 tools/run_tests.py --collect-only)"
 
+# Profile-attribute tests (tests/test_provider_registration.py) resolve through
+# the Hermes provider registry, where the INSTALLED copy
+# (~/.hermes/plugins/model-providers/antigravity) shadows this repo. Keep it
+# synced (./tools/sync-installed.sh) or the suite asserts against stale code —
+# the env-var parity test fails loudly in that case, by design. To run fully
+# hermetic instead: HERMES_HOME=/tmp/htest (empty dir, no installed plugins).
+
 # 2. wire protocol still matches upstream pi-antigravity
 python3 tools/check_upstream_drift.py
 

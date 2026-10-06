@@ -149,7 +149,6 @@ python3 ~/.hermes/plugins/model-providers/antigravity/auth.py
 - `ANTIGRAVITY_ACCESS_TOKEN` : Jeton d'accès Bearer Google.
 - `ANTIGRAVITY_REFRESH_TOKEN` : Jeton de rafraîchissement OAuth.
 - `ANTIGRAVITY_PROJECT_ID` : ID de projet Google Cloud Code Assist.
-- `ANTIGRAVITY_BASE_URL` : Surcharge optionnelle de l'endpoint d'inférence.
 - `ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET` : utiliser votre propre client OAuth
   Google au lieu du client par défaut.
 
