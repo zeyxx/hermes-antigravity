@@ -70,7 +70,7 @@ If you port anything from upstream, update [`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.
 4. **Bilingual user docs**: if you touch user-facing behaviour, update both `README.md` (EN) and `README.fr.md` (FR) in the same PR.
 5. **Tests first**: add or update tests in `tests/` covering any behavioural change, and keep the collected count honest (see above).
 6. **No new dependencies without discussion**: the plugin ships dependency-free; anything new needs a prior issue.
-7. **Version bumps are maintainer releases** (`chore(release)`): do not bump `plugin.yaml` / `pyproject.toml` in a feature PR.
+7. **Version bumps are maintainer releases** (`chore(release)`): do not bump `plugin.yaml` / `pyproject.toml` in a feature PR. The release path is: bump PR (both files in lockstep) → merge → push an annotated tag `vX.Y.Z` → `.github/workflows/release.yml` verifies tag == both version files + suite + drift, then publishes the GitHub release. Never retag or force-push a published tag.
 8. **One PR, one change**: wire-protocol realignments land as a single PR, not a drip of renames.
 
 ---

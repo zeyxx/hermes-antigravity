@@ -169,7 +169,6 @@ If a scanner blocks a push here, read this section before dismissing it: confirm
 
 Signing in requests these Google OAuth scopes:
 
-<!-- prettier-ignore -->
 | Scope | Why it's needed |
 | --- | --- |
 | `aicode` | Access to the Cloud Code Assist / Antigravity model catalog and endpoints |
