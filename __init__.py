@@ -161,16 +161,16 @@ def _model_flow_antigravity(config=None, current_model="", args=None):
     # Always offer the account selector, even with a single account: it is the only
     # way to add another one from this flow. With zero accounts, go straight to login.
     if accounts:
-        print("\n=== Comptes Antigravity ===")
+        print("\n=== Antigravity accounts ===")
         for i, acc in enumerate(accounts, 1):
-            active = " (actif)" if acc.account_id == registry.active_account_id else ""
+            active = " (active)" if acc.account_id == registry.active_account_id else ""
             print(f"  {i}. {acc.email}{active}")
-        print(f"  {len(accounts) + 1}. Ajouter un nouveau compte")
+        print(f"  {len(accounts) + 1}. Add a new account")
         print()
         try:
-            choice = input("Selectionnez un compte (numero) : ").strip()
+            choice = input("Select an account (number): ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nAnnulation.")
+            print("\nCancelled.")
             return
         try:
             idx = int(choice) - 1
@@ -179,24 +179,24 @@ def _model_flow_antigravity(config=None, current_model="", args=None):
             elif idx == len(accounts):
                 AntigravityAuthManager(registry=registry).login_interactive()
             else:
-                print("Entree invalide.")
+                print("Invalid entry.")
                 return
         except (ValueError, IndexError):
-            print("Entree invalide.")
+            print("Invalid entry.")
             return
     else:
-        print("\n=== Authentification Antigravity ===")
+        print("\n=== Antigravity authentication ===")
         try:
             AntigravityAuthManager(registry=registry).login_interactive()
         except (EOFError, KeyboardInterrupt):
-            print("\nAnnulation.")
+            print("\nCancelled.")
             return
 
     auth_mgr = AntigravityAuthManager(registry=registry)
     try:
         token, project_id = auth_mgr.get_credentials()
     except Exception as exc:
-        print(f"Echec de recuperation des credentials: {exc}")
+        print(f"Failed to fetch credentials: {exc}")
         return
     models = fetch_available_models(token, project_id)
     if not models:
@@ -212,9 +212,9 @@ def _model_flow_antigravity(config=None, current_model="", args=None):
         confirm_base_url="https://daily-cloudcode-pa.googleapis.com",
     )
     if selected:
-        msg = f"Modele Google Antigravity configure : {selected}"
+        msg = f"Google Antigravity model configured: {selected}"
         if auth_mgr.email:
-            msg += f" (compte: {auth_mgr.email})"
+            msg += f" (account: {auth_mgr.email})"
         _activate_provider_model(
             selected,
             "antigravity",
