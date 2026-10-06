@@ -58,3 +58,25 @@ def test_antigravity_skips_models_health_probe():
     profile = get_provider_profile("antigravity")
     assert profile is not None
     assert profile.supports_health_check is False
+
+
+def test_declared_env_vars_match_what_the_code_reads():
+    """Catalog rule 5: declared capabilities must match reality.
+
+    Every env var on the profile must be read by auth.py (no dead
+    declarations like the old ANTIGRAVITY_API_KEY), and every
+    ANTIGRAVITY_*/GOOGLE_OAUTH_TOKEN name the code reads must be declared
+    (no silent reads like the old missing REFRESH_TOKEN/PROJECT_ID pair).
+    """
+    import re
+    from pathlib import Path
+
+    profile = get_provider_profile("antigravity")
+    assert profile is not None
+    declared = set(profile.env_vars)
+
+    source = (Path(__file__).resolve().parent.parent / "auth.py").read_text()
+    read = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
+
+    assert declared == read, (
+        f"declared={sorted(declared)} read={sorted(read)}")

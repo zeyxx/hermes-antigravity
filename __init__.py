@@ -92,7 +92,17 @@ antigravity = AntigravityProfile(
     display_name="Google Antigravity",
     description="Google Antigravity / Cloud Code Assist (Gemini 2.5/3.x, Claude Sonnet)",
     signup_url="https://antigravity.google/",
-    env_vars=("ANTIGRAVITY_ACCESS_TOKEN", "ANTIGRAVITY_API_KEY", "GOOGLE_OAUTH_TOKEN"),
+    # Every name here is read by the code (auth.py env fallback, OAuth client
+    # override): declaring exactly the read set keeps the manifest honest for
+    # `hermes plugins capabilities` and the catalog entry (rule 5).
+    env_vars=(
+        "ANTIGRAVITY_ACCESS_TOKEN",
+        "ANTIGRAVITY_REFRESH_TOKEN",
+        "ANTIGRAVITY_PROJECT_ID",
+        "ANTIGRAVITY_CLIENT_ID",
+        "ANTIGRAVITY_CLIENT_SECRET",
+        "GOOGLE_OAUTH_TOKEN",
+    ),
     base_url="https://daily-cloudcode-pa.googleapis.com",
     # NOTE: declared as api_key (not oauth_external) so the core's plugin
     # bridge (_register_plugin_provider, api_key/external_process only)
