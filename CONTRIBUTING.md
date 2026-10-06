@@ -55,8 +55,15 @@ python3 tools/run_tests.py --min-tests "$(python3 tools/run_tests.py --collect-o
 # the Hermes provider registry, where the INSTALLED copy
 # (~/.hermes/plugins/model-providers/antigravity) shadows this repo. Keep it
 # synced (./tools/sync-installed.sh) or the suite asserts against stale code —
-# the env-var parity test fails loudly in that case, by design. To run fully
-# hermetic instead: HERMES_HOME=/tmp/htest (empty dir, no installed plugins).
+# the env-var parity test fails loudly in that case, by design. For a
+# real-conditions run without touching anyone's installed copy, shadow the
+# repo as the installed plugin in a throwaway home (real loader path, real
+# registry layering, zero foreign mutation):
+#   mkdir -p /tmp/hreal/plugins/model-providers
+#   ln -sfn "$(pwd)" /tmp/hreal/plugins/model-providers/antigravity
+#   HERMES_HOME=/tmp/hreal python3 tools/run_tests.py --min-tests \
+#     "$(HERMES_HOME=/tmp/hreal python3 tools/run_tests.py --collect-only)"
+# Fully hermetic (no installed plugins at all): HERMES_HOME=/tmp/htest (empty dir).
 
 # 2. wire protocol still matches upstream pi-antigravity
 python3 tools/check_upstream_drift.py
