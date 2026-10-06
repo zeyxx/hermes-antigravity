@@ -210,7 +210,7 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(
-                b"<html><body><h1>Authentification Antigravity reussie !</h1><p>Vous pouvez fermer cet onglet.</p></body></html>"
+                b"<html><body><h1>Antigravity authentication successful!</h1><p>You can close this tab.</p></body></html>"
             )
         else:
             self.send_response(404)
@@ -347,8 +347,8 @@ class AntigravityAuthManager:
 
         print("\n=== Antigravity Authentication ===")
         if email_hint:
-            print(f"Compte cible : {email_hint}")
-        print(f"Ouvrez cette URL dans votre navigateur pour vous connecter :\n\n{auth_url}\n")
+            print(f"Target account: {email_hint}")
+        print(f"Open this URL in your browser to sign in:\n\n{auth_url}\n")
 
         import webbrowser
         try:
@@ -380,26 +380,26 @@ class AntigravityAuthManager:
             ) in (48, 98, 10048)  # EADDRINUSE on linux / macOS / windows
             if port_taken:
                 print(
-                    f"\nLe port {_CALLBACK_PORT} est deja utilise par un autre "
-                    "processus (probablement une autre session de connexion en cours)."
+                    f"\nPort {_CALLBACK_PORT} is already in use by another "
+                    "process (probably another login session in progress)."
                 )
-                print("Fermez-la, ou collez l'URL de redirection ci-dessous.")
+                print("Close it, or paste the redirect URL below.")
             else:
                 print(
-                    "\nLe callback automatique n'a pas pu demarrer "
+                    "\nThe automatic callback could not start "
                     f"({callback_error})."
                 )
-                print("Collez l'URL de redirection ci-dessous.")
+                print("Paste the redirect URL below.")
 
         if not auth_code:
             if callback_error is None:
-                print("\nLe callback automatique n'a pas fonctionne.")
-            print("Copiez l'URL complete de redirection du navigateur et collez-la ici.")
-            print("Ou collez directement le code d'autorisation.\n")
+                print("\nThe automatic callback did not work.")
+            print("Copy the full redirect URL from the browser and paste it here.")
+            print("Or paste the authorization code directly.\n")
             try:
-                auth_code = input("Code ou URL : ").strip()
+                auth_code = input("Code or URL: ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\nAnnulation.")
+                print("\nCancelled.")
                 raise RuntimeError("OAuth login cancelled by user")
             if "code=" in auth_code:
                 parsed = urllib.parse.urlparse(auth_code)
@@ -462,11 +462,11 @@ class AntigravityAuthManager:
             self._account_record = self._registry.add_account(email=email, credentials=creds)
             self._account_id = self._account_record.account_id
 
-        print(f"Authentification Antigravity enregistree avec succes !")
+        print(f"Antigravity authentication saved successfully!")
         if self._account_record:
-            print(f"  Compte : {self._account_record.email}")
+            print(f"  Account: {self._account_record.email}")
         print(f"  ID     : {self._account_id}")
-        print(f"  Projet : {creds.get('project_id', 'antigravity-default')}\n")
+        print(f"  Project: {creds.get('project_id', 'antigravity-default')}\n")
         return creds
 
     def _fetch_user_email(self, access_token: str) -> str | None:
@@ -735,42 +735,42 @@ def cli_main() -> None:
 
     elif args[0] == "status":
         if registry.account_count == 0:
-            print("Statut : Aucun compte enregistre")
-            print("      Lancez 'hermes auth add antigravity --type oauth' pour authentifier un compte")
+            print("Status: no accounts registered")
+            print("      Run 'hermes auth add antigravity --type oauth' to authenticate an account")
             return
 
         account = registry.get_account()
         if not account:
-            print("Statut : Aucun compte actif")
+            print("Status: no active account")
             return
 
         mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
         try:
             t, p = mgr.get_credentials()
             rem = int(mgr.credentials.get("expires_at", 0) - time.time())
-            print(f"Statut   : Connecte")
-            print(f"Compte   : {account.email}")
-            print(f"ID       : {account.account_id}")
-            print(f"Projet   : {p}")
-            print(f"Token    : {t[:15]}... (expire dans {rem}s)")
+            print(f"Status  : Connected")
+            print(f"Account : {account.email}")
+            print(f"ID      : {account.account_id}")
+            print(f"Project : {p}")
+            print(f"Token   : {t[:15]}... (expires in {rem}s)")
         except Exception as e:
-            print(f"Statut   : Non connecte ({e})")
-            print(f"Compte   : {account.email}")
-            print(f"ID       : {account.account_id}")
+            print(f"Status  : Not connected ({e})")
+            print(f"Account : {account.email}")
+            print(f"ID      : {account.account_id}")
 
     elif args[0] in ("list", "ls"):
         accounts = registry.list_accounts()
         if not accounts:
-            print("Aucun compte enregistre.")
-            print("Lancez 'hermes auth add antigravity --type oauth' pour authentifier un compte.")
+            print("No accounts registered.")
+            print("Run 'hermes auth add antigravity --type oauth' to authenticate an account.")
             return
 
         active_id = registry.active_account_id
-        print(f"{'ACTIF':<6} {'EMAIL':<30} {'ACCOUNT_ID':<18} {'EXPIRE':<12} {'PROJET'}")
+        print(f"{'ACTIVE':<6} {'EMAIL':<30} {'ACCOUNT_ID':<18} {'EXPIRES':<12} {'PROJECT'}")
         print("-" * 90)
         for acc in accounts:
             is_active = "  *  " if acc.account_id == active_id else "     "
-            expired_str = "expire" if acc.is_expired else "valide"
+            expired_str = "expired" if acc.is_expired else "valid"
             proj = acc.credentials.get("project_id", "?")[:20]
             print(f"{is_active:<6} {acc.email:<30} {acc.account_id:<18} {expired_str:<12} {proj}")
 
@@ -781,9 +781,9 @@ def cli_main() -> None:
             return
         account = registry.set_active(target)
         if account:
-            print(f"Compte actif : {account.email} ({account.account_id})")
+            print(f"Active account: {account.email} ({account.account_id})")
         else:
-            print(f"Compte non trouve : {target}")
+            print(f"Account not found: {target}")
 
     elif args[0] in ("remove", "rm", "delete"):
         target = args[1] if len(args) > 1 else None
@@ -791,35 +791,35 @@ def cli_main() -> None:
             print("Usage: auth.py remove <email|account_id>")
             return
         if registry.remove_account(target):
-            print(f"Compte supprime : {target}")
+            print(f"Account removed: {target}")
         else:
-            print(f"Compte non trouve : {target}")
+            print(f"Account not found: {target}")
 
     elif args[0] == "export":
         # Export active account to env var format
         account = registry.get_account()
         if not account:
-            print("Aucun compte actif.")
+            print("No active account.")
             return
         print(f"export ANTIGRAVITY_ACCESS_TOKEN={account.credentials.get('access_token', '')}")
         print(f"export ANTIGRAVITY_REFRESH_TOKEN={account.credentials.get('refresh_token', '')}")
         print(f"export ANTIGRAVITY_PROJECT_ID={account.credentials.get('project_id', '')}")
 
     elif args[0] == "help":
-        print("Gestionnaire multi-compte Google Antigravity pour Hermes Agent")
+        print("Google Antigravity multi-account manager for Hermes Agent")
         print()
-        print("Commandes (fallback — preferez 'hermes auth add antigravity'):")
-        print("  login [email]     Authentifier un nouveau compte (ou re-authentifier)")
-        print("  status            Afficher le statut du compte actif")
-        print("  list              Lister tous les comptes")
-        print("  switch <email>    Changer de compte actif")
-        print("  remove <email>    Supprimer un compte")
-        print("  export            Exporter les tokens du compte actif (format env)")
-        print("  help              Afficher cette aide")
+        print("Commands (fallback — prefer 'hermes auth add antigravity'):")
+        print("  login [email]     Authenticate a new account (or re-authenticate)")
+        print("  status            Show the active account status")
+        print("  list              List all accounts")
+        print("  switch <email>    Switch the active account")
+        print("  remove <email>    Remove an account")
+        print("  export            Export the active account tokens (env format)")
+        print("  help              Show this help")
 
     else:
-        print(f"Commande inconnue : {args[0]}")
-        print("Lancez 'auth.py help' pour les commandes disponibles.")
+        print(f"Unknown command: {args[0]}")
+        print("Run 'auth.py help' for available commands.")
 
 
 if __name__ == "__main__":

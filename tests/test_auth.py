@@ -121,7 +121,7 @@ def test_busy_callback_port_is_reported_with_its_reason():
     output = buffer.getvalue()
     assert str(auth_mod._CALLBACK_PORT) in output, (
         f"the taken port must be named in the message; got: {output!r}")
-    assert "deja utilise" in output or "deja utilisé" in output, (
+    assert "already in use" in output, (
         f"the message must say the port is in use; got: {output!r}")
 
 
