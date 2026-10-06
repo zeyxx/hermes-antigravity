@@ -1,0 +1,82 @@
+name: Release
+
+# Tag-triggered, fail-closed releases. The human decides by pushing an annotated
+# tag (vX.Y.Z); this workflow only verifies and publishes. Anything unverified
+# fails BEFORE the release is created — never after.
+#
+# Release procedure (maintainer):
+#   1. land a chore(release) PR bumping plugin.yaml + pyproject.toml in lockstep
+#   2. git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+#   3. this workflow checks out the TAG (not main) and gates the release on:
+#      tag == plugin.yaml version == pyproject.toml version,
+#      the full test suite, and the upstream drift check.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch the Hermes core
+        run: |
+          git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
+            "$RUNNER_TEMP/hermes-agent"
+          echo "HERMES_CORE=$RUNNER_TEMP/hermes-agent" >> "$GITHUB_ENV"
+
+      - name: Tag matches both version files
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          tag = "${{ github.ref_name }}"
+          m = re.fullmatch(r"v(\d+\.\d+\.\d+)", tag)
+          if not m:
+              sys.exit(f"tag {tag!r} is not vX.Y.Z; refusing to release")
+          want = m.group(1)
+          manifest = open("plugin.yaml").read()
+          pyproject = open("pyproject.toml").read()
+          got_manifest = re.search(r"^version:\s*[\"']?([\d.]+)", manifest, re.M).group(1)
+          got_pyproject = re.search(r"^version\s*=\s*[\"']([\d.]+)", pyproject, re.M).group(1)
+          assert got_manifest == want, f"plugin.yaml says {got_manifest}, tag says {want}"
+          assert got_pyproject == want, f"pyproject.toml says {got_pyproject}, tag says {want}"
+          print(f"version {want} confirmed in tag, plugin.yaml and pyproject.toml")
+          PY
+
+      - name: Run test suite
+        env:
+          PYTHONPATH: ".:${{ env.HERMES_CORE }}"
+        run: |
+          count=$(python3 tools/run_tests.py --collect-only)
+          echo "collected $count tests"
+          python3 tools/run_tests.py --min-tests "$count"
+
+      - name: Upstream drift check
+        run: python3 tools/check_upstream_drift.py --refresh
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          count=$(PYTHONPATH=".:${{ env.HERMES_CORE }}" python3 tools/run_tests.py --collect-only)
+          sha=$(git rev-parse HEAD)
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "Pinned commit: $sha
+          Proof (verified by this workflow on the tagged tree before publishing):
+          - test suite: $count collected, all passing (tools/run_tests.py)
+          - upstream drift: wire constants match pi-antigravity (tools/check_upstream_drift.py)
+          - version files: plugin.yaml and pyproject.toml both carry ${tag#v}"

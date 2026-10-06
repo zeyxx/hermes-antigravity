@@ -186,7 +186,6 @@ utilisateur. Un push bloqué mérite d'être compris plutôt que forcé.
 
 Scopes OAuth demandés à la connexion :
 
-<!-- prettier-ignore -->
 | Scope | Raison |
 | --- | --- |
 | `aicode` | Accès au catalogue et aux endpoints Cloud Code Assist / Antigravity |
