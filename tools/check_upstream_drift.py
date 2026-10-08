@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -237,7 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument(
         "--cache",
-        default=str(REPO_ROOT / ".drift-cache" / "pi-antigravity"),
+        default=os.environ.get(
+            "HERMES_ANTIGRAVITY_DRIFT_CACHE",
+            str(Path.home() / ".cache" / "hermes-antigravity" / "pi-antigravity"),
+        ),
         help="local clone of pi-antigravity",
     )
     args = ap.parse_args(argv)

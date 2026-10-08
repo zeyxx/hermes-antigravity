@@ -84,7 +84,6 @@ def test_busy_callback_port_is_reported_with_its_reason():
     manual paste fallback still works, so it must be reached with the real reason
     shown.
     """
-    import errno
     import io as _io
     import socket
     from contextlib import redirect_stdout
@@ -202,7 +201,6 @@ def test_auth_handler_add_writes_one_pooled_row(monkeypatch=None):
     }
     fake = type(sys)("agent.credential_pool")
     fake.load_pool = _PoolModule.load_pool
-    agent_pkg = sys.modules.get("agent")
     saved = sys.modules.get("agent.credential_pool")
     sys.modules["agent.credential_pool"] = fake
     try:

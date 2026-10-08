@@ -5,6 +5,7 @@ for the Hermes Agent Python runtime.
 """
 import json
 import re
+import time
 import uuid
 from typing import Any
 try:
@@ -114,7 +115,9 @@ class ChoiceDelta:
         content: str | None = None,
         reasoning_content: str | None = None,
         tool_calls: list[Any] | None = None,
+        role: str | None = None,
     ) -> None:
+        self.role = role
         self.content = content
         self.reasoning_content = reasoning_content
         self.tool_calls = tool_calls
@@ -164,24 +167,40 @@ class ChatCompletionChunk:
         model: str,
         choices: list[ChunkChoice],
         usage: dict[str, Any] | None = None,
+        created: int | None = None,
     ) -> None:
         self.id = chunk_id
         self.object = "chat.completion.chunk"
+        self.created = int(time.time()) if created is None else created
         self.model = model
         self.choices = choices
         self.usage = usage
+
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key, None)
+        if val is not None:
+            return val
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        val = getattr(self, key, None)
+        return val if val is not None else default
+
+    def __contains__(self, key: str) -> bool:
+        return getattr(self, key, None) is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "object": self.object,
+            "created": self.created,
             "model": self.model,
             "choices": [
                 {
                     "index": c.index,
                     "delta": {
                         k: getattr(c.delta, k)
-                        for k in ("content", "reasoning_content", "tool_calls")
+                        for k in ("role", "content", "reasoning_content", "tool_calls")
                         if getattr(c.delta, k) is not None
                     },
                     "finish_reason": c.finish_reason,
@@ -384,8 +403,26 @@ def parse_sse_event(json_str: str, model_id: str) -> list[ChatCompletionChunk]:
         return chunks
 
     resp = data.get("response") or data
+    raw_usage = resp.get("usageMetadata") or data.get("usageMetadata")
+    usage = None
+    if isinstance(raw_usage, dict):
+        usage = {
+            "prompt_tokens": raw_usage.get("promptTokenCount", 0),
+            "completion_tokens": raw_usage.get("candidatesTokenCount", 0),
+            "total_tokens": raw_usage.get("totalTokenCount", 0),
+        }
+
     candidates = resp.get("candidates") or []
     if not candidates:
+        if usage:
+            chunks.append(
+                ChatCompletionChunk(
+                    chunk_id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                    model=model_id,
+                    choices=[],
+                    usage=usage,
+                )
+            )
         return chunks
 
     candidate = candidates[0]
@@ -448,12 +485,20 @@ def parse_sse_event(json_str: str, model_id: str) -> list[ChatCompletionChunk]:
                 content=content,
                 reasoning_content=reasoning_content,
                 tool_calls=tool_calls,
+                role="assistant",
             )
             choice = ChunkChoice(
                 index=0,
                 delta=delta,
                 finish_reason=finish_reason if is_last else None,
             )
-            chunks.append(ChatCompletionChunk(chunk_id=chunk_id, model=model_id, choices=[choice]))
+            chunks.append(
+                ChatCompletionChunk(
+                    chunk_id=chunk_id,
+                    model=model_id,
+                    choices=[choice],
+                    usage=usage if is_last else None,
+                )
+            )
 
     return chunks
