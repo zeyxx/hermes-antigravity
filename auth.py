@@ -79,10 +79,10 @@ except ImportError:
     from accounts import LEGACY_CACHE_FILE
 
 try:
-    from .accounts import AntigravityAccountRegistry, AccountRecord, DEFAULT_REGISTRY_PATH
+    from .accounts import AntigravityAccountRegistry, AccountRecord
     from .models import DEFAULT_USER_AGENT
 except ImportError:
-    from accounts import AntigravityAccountRegistry, AccountRecord, DEFAULT_REGISTRY_PATH
+    from accounts import AntigravityAccountRegistry, AccountRecord
     from models import DEFAULT_USER_AGENT
 
 
@@ -117,7 +117,7 @@ def extract_project_id(data: dict[str, Any]) -> str | None:
 
 def load_local_token(cache_paths: list[str | Path] | None = None) -> dict[str, Any] | None:
     """Check known local token locations on this machine (legacy single-account format).
-    
+
     DEPRECATED: Use AntigravityAccountRegistry instead. This function is kept for
     backward compatibility and migration purposes only.
     """
@@ -198,7 +198,7 @@ def load_local_token(cache_paths: list[str | Path] | None = None) -> dict[str, A
 
 def save_token_cache(data: dict[str, Any], cache_path: Path | str = LEGACY_CACHE_FILE) -> None:
     """Save credentials to disk with 0600 permissions (legacy single-account format).
-    
+
     DEPRECATED: Use AntigravityAccountRegistry.add_account() instead.
     """
     p = Path(cache_path).expanduser()
@@ -238,7 +238,7 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
 
 class AntigravityAuthManager:
     """Manages Google Antigravity OAuth tokens with multi-account support.
-    
+
     When account_id is specified, credentials are read/written from the registry.
     When not specified, falls back to the active account in the registry.
     """
@@ -339,10 +339,10 @@ class AntigravityAuthManager:
 
     def login_interactive(self, email_hint: str | None = None) -> dict[str, Any]:
         """Perform interactive OAuth 2.0 PKCE flow.
-        
+
         Args:
             email_hint: Optional email to pre-fill or label the account.
-        
+
         Returns:
             The credentials dict for the newly authenticated account.
         """
@@ -478,7 +478,7 @@ class AntigravityAuthManager:
             self._account_record = self._registry.add_account(email=email, credentials=creds)
             self._account_id = self._account_record.account_id
 
-        print(f"Antigravity authentication saved successfully!")
+        print("Antigravity authentication saved successfully!")
         if self._account_record:
             print(f"  Account: {self._account_record.email}")
         print(f"  ID     : {self._account_id}")
@@ -521,7 +521,7 @@ class AntigravityAuthManager:
 
     def get_credentials(self) -> tuple[str, str]:
         """Return (access_token, project_id), auto-refreshing if expired.
-        
+
         If no account exists or all accounts are expired with no refresh token,
         triggers interactive login.
         """
@@ -574,7 +574,7 @@ def _antigravity_token_extractor(creds: dict) -> str:
 
 def _antigravity_fields_extractor(creds: dict, provider: str) -> dict:
     """Extract additional fields for the credential pool entry.
-    
+
     project_id and email go into the 'extra' dict (accepted by PooledCredential),
     while refresh_token and base_url are proper dataclass fields.
     """
@@ -662,9 +662,9 @@ def _antigravity_remove_source(provider: str, removed) -> Any:
     """RemoveStep for hermes auth remove antigravity — cleans the account registry."""
     from agent.credential_sources import RemovalResult
     result = RemovalResult()
-    
+
     registry = AntigravityAccountRegistry()
-    
+
     # Try to find by email first (stored in extra fields)
     email = None
     if hasattr(removed, 'extra') and isinstance(removed.extra, dict):
@@ -676,19 +676,19 @@ def _antigravity_remove_source(provider: str, removed) -> Any:
     account_id = getattr(removed, "id", None)
     # Fallback: try by access_token
     access_token = getattr(removed, "access_token", None)
-    
+
     removed_from_registry = False
-    
+
     # Try removing by email
     if email and registry.remove_account(email):
         result.cleaned.append(f"Removed Antigravity account: {email}")
         removed_from_registry = True
-    
+
     # If not found by email, try by account ID
     if not removed_from_registry and account_id and registry.remove_account(account_id):
         result.cleaned.append(f"Removed Antigravity account: {account_id}")
         removed_from_registry = True
-    
+
     # If still not found, try matching by access_token
     if not removed_from_registry and access_token:
         for acc in registry.list_accounts():
@@ -697,10 +697,10 @@ def _antigravity_remove_source(provider: str, removed) -> Any:
                 result.cleaned.append(f"Removed Antigravity account: {acc.email}")
                 removed_from_registry = True
                 break
-    
+
     if not removed_from_registry:
         result.hints.append(f"Note: account may still exist in registry (not found by {email or account_id})")
-    
+
     result.suppress = False  # Don't suppress — allow re-add
     return result
 
@@ -764,7 +764,7 @@ def cli_main() -> None:
         try:
             t, p = mgr.get_credentials()
             rem = int(mgr.credentials.get("expires_at", 0) - time.time())
-            print(f"Status  : Connected")
+            print("Status  : Connected")
             print(f"Account : {account.email}")
             print(f"ID      : {account.account_id}")
             print(f"Project : {p}")

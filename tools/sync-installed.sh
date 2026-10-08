@@ -50,7 +50,7 @@ fi
 # --- the gate -------------------------------------------------------------
 if [ -d "$DEST/.git" ]; then
   dirty="$(git -C "$DEST" status --porcelain 2>/dev/null || true)"
-  if [ -n "$dirty" ]; then
+  if [ -n "$dirty" ] && [ "$FORCE" -eq 0 ]; then
     echo
     echo "REFUSING: the installed plugin has uncommitted changes:"
     echo "$dirty" | sed 's/^/  /'

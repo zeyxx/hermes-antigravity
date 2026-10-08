@@ -11,7 +11,6 @@ from accounts import (
     AccountRecord,
     AntigravityAccountRegistry,
     _account_id_from_email,
-    REGISTRY_VERSION,
 )
 
 

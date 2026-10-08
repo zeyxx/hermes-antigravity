@@ -8,8 +8,6 @@ from models import (
     get_thinking_config,
     fetch_available_models,
     clamp_max_tokens,
-    MAX_OUTPUT_TOKENS,
-    DEFAULT_MAX_OUTPUT_TOKENS,
     stable_uuid,
     resolve_session_trajectory,
     antigravity_request_envelope,
@@ -261,7 +259,6 @@ def test_drift_tracker_lists_every_envelope_label_we_send():
     A new label added in models.py without a tracker row is drift waiting to
     happen, so this fails closed on the addition side.
     """
-    import re
     from models import antigravity_request_envelope
 
     tracker = Path("UPSTREAM_DRIFT.md").read_text(encoding="utf-8")
@@ -377,7 +374,6 @@ def test_fetch_available_models_records_the_enum():
     import tempfile
     from pathlib import Path
     from unittest.mock import patch
-    import io as _io
     import json as _json
     import models as models_mod
 

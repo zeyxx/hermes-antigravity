@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import inspect
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -68,8 +69,27 @@ def _collect_callables(module_name: str, module: Any) -> list[tuple[str, Any]]:
     return found
 
 
+def _ensure_paths() -> None:
+    # Auto-discover Hermes core install if available and not already in sys.path
+    hermes_core = os.environ.get("HERMES_CORE")
+    if hermes_core and Path(hermes_core).is_dir():
+        if str(hermes_core) not in sys.path:
+            sys.path.insert(0, str(hermes_core))
+    else:
+        default_core = Path.home() / ".hermes" / "hermes-agent"
+        if default_core.is_dir() and str(default_core) not in sys.path:
+            sys.path.insert(0, str(default_core))
+
+    # Hermes' plugin loader re-execs this process through runpy, which REPLACES
+    # sys.path and drops the plugin's own directory. Re-anchor it on every run so
+    # `import accounts` keeps resolving after any reload.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+
+
 def collect() -> tuple[int, list[str]]:
     """Count test callables across importable modules, classes included."""
+    _ensure_paths()
     total = 0
     broken: list[str] = []
     for name in MODULES:
@@ -97,11 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    # Hermes' plugin loader re-execs this process through runpy, which REPLACES
-    # sys.path and drops the plugin's own directory. Re-anchor it on every run so
-    # `import accounts` keeps resolving after any reload.
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
+    _ensure_paths()
     importlib.import_module("providers")  # establish the provider registry first
 
     if args.collect_only:

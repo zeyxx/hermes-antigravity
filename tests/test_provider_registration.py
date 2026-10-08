@@ -6,7 +6,7 @@ from pathlib import Path
 hermes_agent_dir = Path.home() / ".hermes" / "hermes-agent"
 if hermes_agent_dir.is_dir() and str(hermes_agent_dir) not in sys.path:
     sys.path.insert(0, str(hermes_agent_dir))
-from providers import get_provider_profile
+from providers import get_provider_profile  # noqa: E402
 
 
 def test_antigravity_profile_registered():

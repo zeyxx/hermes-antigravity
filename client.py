@@ -10,6 +10,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
+import uuid
 from typing import Any, Iterator
 try:
     from .auth import AntigravityAuthManager
@@ -21,7 +22,14 @@ try:
         resolve_session_trajectory,
         antigravity_request_envelope,
     )
-    from .translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk, _to_well_formed
+    from .translator import (
+        to_antigravity_payload,
+        parse_sse_event,
+        ChatCompletionChunk,
+        ChoiceDeltaToolCall,
+        ChoiceDeltaToolCallFunction,
+        _to_well_formed,
+    )
 except ImportError:
     from auth import AntigravityAuthManager
     from models import (
@@ -32,9 +40,165 @@ except ImportError:
         resolve_session_trajectory,
         antigravity_request_envelope,
     )
-    from translator import to_antigravity_payload, parse_sse_event, ChatCompletionChunk, _to_well_formed
+    from translator import (
+        to_antigravity_payload,
+        parse_sse_event,
+        ChatCompletionChunk,
+        ChoiceDeltaToolCall,
+        ChoiceDeltaToolCallFunction,
+        _to_well_formed,
+    )
 
 logger = logging.getLogger(__name__)
+
+
+class ChatCompletionMessage:
+    def __init__(
+        self,
+        role: str = "assistant",
+        content: str | None = None,
+        reasoning_content: str | None = None,
+        tool_calls: list[Any] | None = None,
+    ) -> None:
+        self.role = role
+        self.content = content
+        self.reasoning_content = reasoning_content
+        self.tool_calls = tool_calls
+
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key, None)
+        if val is not None:
+            return val
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        val = getattr(self, key, None)
+        return val if val is not None else default
+
+    def __contains__(self, key: str) -> bool:
+        return getattr(self, key, None) is not None
+
+
+class ChatCompletionChoice:
+    def __init__(
+        self,
+        index: int = 0,
+        message: ChatCompletionMessage | None = None,
+        finish_reason: str | None = "stop",
+    ) -> None:
+        self.index = index
+        self.message = message or ChatCompletionMessage()
+        self.finish_reason = finish_reason
+
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key, None)
+        if val is not None:
+            return val
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        val = getattr(self, key, None)
+        return val if val is not None else default
+
+    def __contains__(self, key: str) -> bool:
+        return getattr(self, key, None) is not None
+
+
+class CompletionUsage:
+    def __init__(
+        self,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key, None)
+        if val is not None:
+            return val
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        val = getattr(self, key, None)
+        return val if val is not None else default
+
+    def __contains__(self, key: str) -> bool:
+        return getattr(self, key, None) is not None
+
+
+class ChatCompletionResponse:
+    def __init__(
+        self,
+        id: str,
+        model: str,
+        choices: list[ChatCompletionChoice],
+        usage: CompletionUsage | None = None,
+    ) -> None:
+        self.id = id
+        self.object = "chat.completion"
+        self.created = int(time.time())
+        self.model = model
+        self.choices = choices
+        self.usage = usage
+
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key, None)
+        if val is not None:
+            return val
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        val = getattr(self, key, None)
+        return val if val is not None else default
+
+    def __contains__(self, key: str) -> bool:
+        return getattr(self, key, None) is not None
+
+    def __await__(self):
+        async def _identity():
+            return self
+        return _identity().__await__()
+
+
+class StreamResponse:
+    """Synchronous & asynchronous iterable generator for streaming completions."""
+
+    def __init__(self, generator: Iterator[ChatCompletionChunk], response: Any = None) -> None:
+        self._gen = generator
+        self._resp = response
+
+    def __iter__(self) -> Iterator[ChatCompletionChunk]:
+        return self
+
+    def __next__(self) -> ChatCompletionChunk:
+        return next(self._gen)
+
+    def __enter__(self) -> StreamResponse:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._resp is not None and hasattr(self._resp, "close"):
+            try:
+                self._resp.close()
+            except Exception:
+                pass
+
+    def __await__(self):
+        async def _identity():
+            return self
+        return _identity().__await__()
+
+    def __aiter__(self):
+        async def _agen():
+            for chunk in self._gen:
+                yield chunk
+        return _agen()
 
 
 class _CompletionsAdapter:
@@ -43,18 +207,18 @@ class _CompletionsAdapter:
 
     def create(
         self,
-        model: str,
-        messages: list[dict[str, Any]],
-        stream: bool = True,
+        messages: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        stream: bool = False,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         **kwargs: Any,
-    ) -> Iterator[ChatCompletionChunk] | Any:
+    ) -> Any:
         return self._client.generate(
+            messages=messages or [],
             model=model,
-            messages=messages,
             stream=stream,
             tools=tools,
             tool_choice=tool_choice,
@@ -71,6 +235,9 @@ class _ChatAdapter:
 
 class AntigravityClient:
     """Client implementing the client.chat.completions interface for Hermes Agent."""
+
+    HERMES_SKIP_TRANSPORT_WRAP = True
+    HERMES_SKIP_ASYNC_WRAP = True
 
     def __init__(
         self,
@@ -114,15 +281,15 @@ class AntigravityClient:
 
     def generate(
         self,
-        model: str,
         messages: list[dict[str, Any]],
-        stream: bool = True,
+        model: str | None = None,
+        stream: bool = False,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         **kwargs: Any,
-    ) -> Iterator[ChatCompletionChunk] | Any:
+    ) -> Any:
         reasoning_effort = kwargs.get("reasoning_effort")
         if not reasoning_effort and isinstance(kwargs.get("extra_body"), dict):
             reasoning_effort = kwargs["extra_body"].get("reasoning_effort")
@@ -305,38 +472,85 @@ class AntigravityClient:
                     if not payload_part or payload_part == "[DONE]":
                         continue
                     chunks = parse_sse_event(payload_part, model_id=runtime_model)
-                    for c in chunks:
-                        yield c
+                    yield from chunks
 
         if stream:
-            return sse_generator()
+            return StreamResponse(sse_generator(), response=response)
 
-        # Non-streaming fallback: collect and aggregate chunks
+        # Non-streaming: collect and aggregate chunks into a ChatCompletionResponse
         all_chunks = list(sse_generator())
-        content_parts = []
-        reasoning_parts = []
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls_map: dict[str, dict[str, Any]] = {}
         finish_reason = "stop"
+        usage_obj: CompletionUsage | None = None
+
         for chunk in all_chunks:
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage and isinstance(chunk_usage, dict):
+                usage_obj = CompletionUsage(
+                    prompt_tokens=chunk_usage.get("prompt_tokens", 0),
+                    completion_tokens=chunk_usage.get("completion_tokens", 0),
+                    total_tokens=chunk_usage.get("total_tokens", 0),
+                )
             for ch in chunk.choices:
-                delta = ch.get("delta", {})
-                if "content" in delta and delta["content"]:
-                    content_parts.append(delta["content"])
-                if "reasoning_content" in delta and delta["reasoning_content"]:
-                    reasoning_parts.append(delta["reasoning_content"])
-                if ch.get("finish_reason"):
-                    finish_reason = ch["finish_reason"]
+                delta = getattr(ch, "delta", None) or (ch.get("delta", {}) if isinstance(ch, dict) else {})
+                c = getattr(delta, "content", None) if not isinstance(delta, dict) else delta.get("content")
+                if c:
+                    content_parts.append(c)
+                r = getattr(delta, "reasoning_content", None) if not isinstance(delta, dict) else delta.get("reasoning_content")
+                if r:
+                    reasoning_parts.append(r)
+                tcs = getattr(delta, "tool_calls", None) if not isinstance(delta, dict) else delta.get("tool_calls")
+                if tcs:
+                    for tc in tcs:
+                        tc_id = getattr(tc, "id", None) if not isinstance(tc, dict) else tc.get("id")
+                        fn = getattr(tc, "function", None) if not isinstance(tc, dict) else tc.get("function")
+                        fn_name = getattr(fn, "name", "") if not isinstance(fn, dict) else fn.get("name", "")
+                        fn_args = getattr(fn, "arguments", "") if not isinstance(fn, dict) else fn.get("arguments", "")
+                        if tc_id and tc_id in tool_calls_map:
+                            tool_calls_map[tc_id]["function"]["arguments"] += fn_args
+                        elif tc_id:
+                            tool_calls_map[tc_id] = {
+                                "id": tc_id,
+                                "type": "function",
+                                "function": {"name": fn_name, "arguments": fn_args},
+                            }
+                fr = getattr(ch, "finish_reason", None) if not isinstance(ch, dict) else ch.get("finish_reason")
+                if fr:
+                    finish_reason = fr
 
-        class _NonStreamingResponse:
-            def __init__(self) -> None:
-                self.choices = [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "".join(content_parts),
-                            "reasoning_content": "".join(reasoning_parts) if reasoning_parts else None,
-                        },
-                        "finish_reason": finish_reason,
-                    }
-                ]
+        final_tool_calls: list[ChoiceDeltaToolCall] | None = None
+        if tool_calls_map:
+            final_tool_calls = [
+                ChoiceDeltaToolCall(
+                    index=i,
+                    id=data["id"],
+                    type="function",
+                    function=ChoiceDeltaToolCallFunction(
+                        name=data["function"]["name"],
+                        arguments=data["function"]["arguments"],
+                    ),
+                )
+                for i, data in enumerate(tool_calls_map.values())
+            ]
+            if finish_reason == "stop":
+                finish_reason = "tool_calls"
 
-        return _NonStreamingResponse()
+        choice = ChatCompletionChoice(
+            index=0,
+            message=ChatCompletionMessage(
+                role="assistant",
+                content="".join(content_parts) if content_parts else None,
+                reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
+                tool_calls=final_tool_calls,
+            ),
+            finish_reason=finish_reason,
+        )
+
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            model=runtime_model,
+            choices=[choice],
+            usage=usage_obj,
+        )
