@@ -14,12 +14,19 @@ upstream bump shows up as a red test rather than a silent degradation.
 
 ## How to use this
 
-1. `git fetch` pi-antigravity, note its version and commit date.
-2. Compare each row below against its upstream source.
-3. On any mismatch: port the change, update **both** columns and the `checked` date, and
-   open a PR. Never change a value here without changing the code that uses it.
-4. Rows marked **port only** are deliberately absent upstream. Do not "fix" them by
-   copying upstream — they exist because Hermes passes something Pi does not.
+Two references, checked separately:
+
+1. **Official CLI** (the fingerprint source): measure the live User-Agent of the
+   `agy` binary (see "How the official CLI was measured" below) and note the
+   version + build. This drives `CLI_VERSION` / `CLI_BUILD`.
+2. **pi-antigravity** (the protocol reference): `git fetch` it and compare each
+   protocol row below (scopes, redirect, model enums) against its TypeScript
+   source.
+3. On any mismatch: port the change, update the relevant columns and the
+   `checked` date, and open a PR. Never change a value here without changing the
+   code that uses it.
+4. Rows marked **port only** are deliberately absent upstream. Do not "fix" them
+   by copying upstream — they exist because Hermes passes something Pi does not.
 
 ### Finding *when* a value moved
 
@@ -51,8 +58,8 @@ table and envelope notes remain useful.
 
 | Field | Official CLI | pi-antigravity | hermes-antigravity | Since | Checked |
 |---|---|---|---|---|---|
-| CLI version | `1.3.3` | `1.2.4` | `1.3.3` | **0.10.0 / measured** | 2026-10-10 |
-| CLI build (`cl=`) | `996823801` | `982146307` | `996823801` | **0.10.0 / measured** | 2026-10-10 |
+| CLI version | `1.3.3` | `1.2.4` | `1.3.3` | **measured** (2026-10-10) | 2026-10-10 |
+| CLI build (`cl=`) | `996823801` | `982146307` | `996823801` | **measured** (2026-10-10) | 2026-10-10 |
 | User-Agent shape | `antigravity/cli/<v> (aidev_client; os_type=; arch=; cl=; auth_method=consumer)` | `antigravity/cli/<v> (aidev_client; os_type=; arch=; cl=; auth_method=consumer)` | same, host-derived `os_type`/`arch` | **0.5.0** | 2026-10-10 |
 | OAuth scopes | 6 scopes | 6 scopes | same 6, same order | 0.1.0 | 2026-10-10 |
 | OAuth callback | `http://localhost:51121/oauth-callback` | `http://localhost:51121/oauth-callback` | same | 0.1.0 | 2026-10-10 |

@@ -24,9 +24,10 @@ CLI_BUILD = "996823801"
 def get_user_agent() -> str:
     """Return authentic Antigravity CLI wire User-Agent matching host OS and arch.
 
-    CLI_VERSION / CLI_BUILD track the official Antigravity desktop client that the
-    relay expects. When upstream moves, tests/test_models.py fails until this is
-    bumped in lockstep with pi-antigravity.
+    CLI_VERSION / CLI_BUILD track the official Antigravity desktop client that
+    the relay expects. When the official CLI moves, tests/test_models.py fails
+    until this is bumped in lockstep (see tools/check_upstream_drift.py:
+    OFFICIAL_CLI_VERSION / OFFICIAL_CLI_BUILD).
     """
     sys_os = platform.system().lower()
     os_type = "windows" if "win" in sys_os else ("darwin" if "darwin" in sys_os else "linux")

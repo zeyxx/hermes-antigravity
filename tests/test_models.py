@@ -246,17 +246,46 @@ def test_drift_tracker_agrees_with_code_on_cli_version():
 
     tracker = Path("UPSTREAM_DRIFT.md").read_text(encoding="utf-8")
 
-    up, port = _tracker_row(tracker, "CLI version")
+    official, port = _tracker_row(tracker, "CLI version")
     assert port.strip("`") == models_mod.CLI_VERSION, (
         "tracker CLI version does not match models.py")
-    assert up.strip("`") == port.strip("`"), "port and upstream disagree in the tracker"
+    assert official.strip("`") == port.strip("`"), (
+        "port and official CLI disagree in the tracker")
 
-    up_b, port_b = _tracker_row(tracker, "CLI build")
+    official_b, port_b = _tracker_row(tracker, "CLI build")
     assert port_b.strip("`") == models_mod.CLI_BUILD, (
         "tracker CLI build does not match models.py")
-    assert up_b.strip("`") == port_b.strip("`")
+    assert official_b.strip("`") == port_b.strip("`")
 
     assert plugin.MIN_CORE_VERSION == "0.20.0"
+
+
+def test_drift_tracker_official_column_matches_checker_constants():
+    """The tracker's Official CLI column must equal the checker's constants.
+
+    The drift checker compares the fingerprint to OFFICIAL_CLI_VERSION /
+    OFFICIAL_CLI_BUILD, not to pi-antigravity. A wrong value in the tracker's
+    Official CLI column would go undetected by the port-vs-tracker test above,
+    so pin the tracker against the same constants the checker gates on.
+    """
+    import importlib.util
+    from pathlib import Path as _Path
+
+    tracker = Path("UPSTREAM_DRIFT.md").read_text(encoding="utf-8")
+
+    # Load the drift checker module from tools/ without a package.
+    checker_path = _Path(__file__).resolve().parent.parent / "tools" / "check_upstream_drift.py"
+    spec = importlib.util.spec_from_file_location("check_upstream_drift", checker_path)
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+
+    official_ver, _ = _tracker_row(tracker, "CLI version")
+    official_build, _ = _tracker_row(tracker, "CLI build")
+
+    assert official_ver.strip("`") == checker.OFFICIAL_CLI_VERSION, (
+        "tracker Official CLI version does not match the checker constant")
+    assert official_build.strip("`") == checker.OFFICIAL_CLI_BUILD, (
+        "tracker Official CLI build does not match the checker constant")
 
 
 def test_drift_tracker_lists_every_envelope_label_we_send():
