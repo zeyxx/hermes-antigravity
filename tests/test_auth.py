@@ -155,10 +155,15 @@ def test_provider_declares_public_auth_hooks():
 
 
 def test_auth_handler_declines_actions_the_core_owns():
-    """Only `add` is ours; status/logout/refresh belong to the core for a mirrored plugin."""
+    """Only `add` and `status` are ours; logout/refresh/unknown fall through.
+
+    `status` is claimed so it can append live quota (the core prints nothing
+    more once we return True), while `logout` stays core-owned and `refresh` is
+    driven by the pool's own rotation via refresh_credential.
+    """
     from auth import antigravity_auth_handler
 
-    for action in ("status", "logout", "refresh", "unknown"):
+    for action in ("logout", "refresh", "unknown"):
         assert antigravity_auth_handler(action, None) is False, (
             f"{action} must fall through to the core path")
 

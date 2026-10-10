@@ -80,6 +80,9 @@ table and envelope notes remain useful.
 | Text sanitising | `sanitizeText` | `sanitizeText` | same | 0.9.0 / #9 | 2026-10-10 |
 | `$ref` schema resolution | local pointers | local pointers | **port only** — see below | — | 2026-10-10 |
 | Quota failover | `failoverToNextAccount` | `failoverToNextAccount` | `next_untried_account` | 0.8.0 / #13 | 2026-10-10 |
+| Per-model quota (`quotaInfo`) | `remainingFraction`, `resetTime` | `remainingFraction`, `resetTime` | parsed in `quota.py`, measured via `fetch_account_quota` | 0.10.0 | 2026-10-10 |
+| Aggregate quota (`retrieveUserQuotaSummary`) | groups/buckets, 403 on free-tier | groups/buckets, 403 on free-tier | `quota.parse_quota_groups`, best-effort | 0.10.0 | 2026-10-10 |
+| Plan tier (`paidTier` over `currentTier`) | `planLabel` | `planLabel` | `quota.plan_label` | 0.10.0 | 2026-10-10 |
 
 ## How the official CLI was measured
 

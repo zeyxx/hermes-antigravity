@@ -624,20 +624,28 @@ def antigravity_auth_handler(action: str, args: Any) -> bool:
     The core calls this first for ``hermes auth add|status|logout|refresh
     antigravity``. Return True when the plugin owned the action.
 
-    Only ``add`` is handled here:
+    ``add`` and ``status`` are handled here:
 
-    - ``status`` and ``logout`` are already served for a plugin-mirrored provider:
-      ``get_plugin_oauth_auth_status`` reads the credential pool this handler
-      fills, and logout removes from the same pool.
-    - ``refresh`` is owned by the core: declaring ``refresh_credential`` makes the
-      pool rotate the token itself (``agent.credential_pool``), so handling it
-      here would double-refresh.
-    - ``add`` is ours: the login owns a Google OAuth 2.0 PKCE flow with a loopback
-      callback, and the core has no token endpoint to call for it.
+    - ``add`` is ours: the login owns a Google OAuth 2.0 PKCE flow with a
+      loopback callback, and the core has no token endpoint to call for it.
+    - ``status`` is ours so it can append live quota: the core's pool status
+      (logged in, account count, base url) is reproduced, then a quota line is
+      read from Antigravity. When we own ``status`` the core prints nothing
+      more, so the pool facts must be restated here — losing them would make
+      the command quieter, not richer.
+    - ``logout`` stays core-owned: it removes from the same pool this handler
+      fills, and our ``remove`` step already cleans the account registry.
+    - ``refresh`` is owned by the core: declaring ``refresh_credential`` makes
+      the pool rotate the token itself, so handling it here would double-refresh.
     """
-    if action != "add":
-        return False
+    if action == "add":
+        return _antigravity_auth_add(args)
+    if action == "status":
+        return _antigravity_auth_status(args)
+    return False
 
+
+def _antigravity_auth_add(args: Any) -> bool:
     from agent.credential_pool import load_pool
 
     pool = load_pool("antigravity")
@@ -656,6 +664,111 @@ def antigravity_auth_handler(action: str, args: Any) -> bool:
     who = creds.get("email") or "unknown"
     print(f"Signed in to Google Antigravity as {who} ({label}).")
     return True
+
+
+def _antigravity_auth_status(args: Any) -> bool:
+    """``hermes auth status antigravity`` — pool status plus live quota.
+
+    Reproduces what the core's ``get_plugin_oauth_auth_status`` path would
+    print for a plugin-mirrored provider, then measures and appends the
+    account's remaining quota. The quota read is best-effort and read-only: an
+    unreachable relay or a free-tier account reports that explicitly and never
+    turns a healthy login into a failure.
+    """
+    from agent.credential_pool import load_pool
+
+    provider = getattr(args, "provider", "antigravity") or "antigravity"
+    entries = [
+        e for e in load_pool(provider).entries()
+        if (e.access_token or e.agent_key or "").strip()
+    ]
+
+    # Mirror the core's expiry notion so 'logged in' agrees with the pool.
+    live = [e for e in entries if not _pool_entry_expired(e)]
+
+    if not live:
+        print(f"{provider}: logged out")
+        print("  Run `hermes auth add antigravity` to sign in.")
+        return True
+
+    print(f"{provider}: logged in")
+    print(f"  accounts: {len(entries)}")
+    base_url = next((e.base_url for e in live if e.base_url), "") or ""
+    if base_url:
+        print(f"  api_base_url: {base_url}")
+
+    registry = AntigravityAccountRegistry()
+    account = registry.get_account()
+    if account is not None:
+        print(f"  account: {account.email}")
+
+    _print_quota_status(registry, account)
+    return True
+
+
+def _pool_entry_expired(entry: Any) -> bool:
+    """A pooled OAuth row is expired when its expires_at is in the past."""
+    import time as _time
+
+    expires = getattr(entry, "expires_at", None)
+    if not expires:
+        return False
+    try:
+        from datetime import datetime
+
+        if isinstance(expires, (int, float)):
+            return float(expires) <= _time.time()
+        clean = str(expires).strip()
+        if clean.endswith("Z"):
+            clean = clean[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(clean)
+        if parsed.tzinfo is None:
+            from datetime import timezone
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp() <= _time.time()
+    except Exception:
+        return False
+
+
+def _print_quota_status(registry: "AntigravityAccountRegistry", account: Any) -> None:
+    """Append a compact quota line to the status output; never raise."""
+    if account is None:
+        return
+    mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
+    try:
+        token, project_id = mgr.get_credentials()
+    except Exception as exc:
+        print(f"  quota: unavailable ({exc})")
+        return
+    try:
+        from models import fetch_account_quota
+        import quota as _quota_mod
+
+        snapshot = fetch_account_quota(token, project_id, timeout=6.0, email=account.email)
+        plan = snapshot.get("plan")
+        if plan:
+            print(f"  plan: {plan}")
+        # Summarise the aggregate groups when present (paid tier), else the
+        # per-model view, so free-tier accounts still see something concrete.
+        groups = snapshot.get("groups") or []
+        if groups:
+            for group in groups:
+                buckets = ", ".join(
+                    f"{b['displayName']} {_quota_mod.percent_label(b.get('remainingFraction'))}"
+                    for b in group.get("buckets", [])
+                )
+                print(f"  quota: {group['displayName']} — {buckets}")
+        else:
+            if snapshot.get("groupError"):
+                print("  quota: per-model only (aggregate needs a paid subscription)")
+            low = [
+                m for m in snapshot.get("models", [])
+                if _quota_mod.quota_is_low(m)
+            ]
+            n = len(snapshot.get("models", []))
+            print(f"  quota: {n} models advertised, {len(low)} exhausted")
+    except Exception as exc:
+        print(f"  quota: unavailable ({exc})")
 
 
 def _antigravity_remove_source(provider: str, removed) -> Any:
@@ -736,6 +849,67 @@ def _register_removal_step() -> bool:
         return False
 
 
+def _cli_quota(registry: AntigravityAccountRegistry) -> None:
+    """``auth.py quota [--json]`` — measure the active account's remaining quota.
+
+    Read-only: this never touches the registry or a token, it only reports what
+    Antigravity currently says. An unreachable relay or an unauthenticated
+    account is reported as such rather than shown as "0% left" — an unknown
+    quota must stay visibly unknown.
+    """
+    import sys as _sys
+
+    want_json = "--json" in _sys.argv[2:]
+
+    account = registry.get_account()
+    if account is None:
+        if registry.account_count == 0:
+            msg = "no accounts registered"
+        else:
+            msg = "no active account"
+        if want_json:
+            print(json.dumps({"ok": False, "error": msg}, indent=2))
+        else:
+            print(f"Quota: {msg}.")
+            print("      Run 'hermes auth add antigravity --type oauth' to authenticate an account")
+        return
+
+    mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
+    try:
+        token, project_id = mgr.get_credentials()
+    except Exception as exc:
+        if want_json:
+            print(json.dumps({"ok": False, "error": f"credentials unavailable: {exc}"}, indent=2))
+        else:
+            print(f"Quota: could not resolve credentials for {account.email} ({exc}).")
+        return
+
+    from models import fetch_account_quota
+    import quota as _quota_mod
+
+    try:
+        snapshot = fetch_account_quota(token, project_id, email=account.email)
+    except Exception as exc:
+        if want_json:
+            print(json.dumps({"ok": False, "error": f"quota fetch failed: {exc}"}, indent=2))
+        else:
+            print(f"Quota: Antigravity unreachable ({exc}).")
+        return
+
+    if want_json:
+        print(json.dumps(snapshot, indent=2))
+        return
+
+    print(_quota_mod.format_quota_report(
+        account_email=account.email,
+        plan=snapshot.get("plan"),
+        groups=snapshot.get("groups", []),
+        models=snapshot.get("models", []),
+        group_error=snapshot.get("groupError"),
+        now=snapshot.get("fetchedAt", time.time()),
+    ))
+
+
 def cli_main() -> None:
     """CLI entry point for account management (fallback when hermes auth is unavailable)."""
     import sys
@@ -773,6 +947,9 @@ def cli_main() -> None:
             print(f"Status  : Not connected ({e})")
             print(f"Account : {account.email}")
             print(f"ID      : {account.account_id}")
+
+    elif args[0] == "quota":
+        _cli_quota(registry)
 
     elif args[0] in ("list", "ls"):
         accounts = registry.list_accounts()
@@ -827,6 +1004,7 @@ def cli_main() -> None:
         print("Commands (fallback — prefer 'hermes auth add antigravity'):")
         print("  login [email]     Authenticate a new account (or re-authenticate)")
         print("  status            Show the active account status")
+        print("  quota [--json]    Measure remaining quota for the active account")
         print("  list              List all accounts")
         print("  switch <email>    Switch the active account")
         print("  remove <email>    Remove an account")
