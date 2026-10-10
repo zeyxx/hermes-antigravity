@@ -54,20 +54,36 @@ def _capture_client_hello(ctx):
         try:
             hello = hs[5:5 + int.from_bytes(hs[3:5], "big")][4:]
             p = 0
-            legacy = _u16(hello, p); p += 34
-            p += 1 + hello[p]; n = _u16(hello, p); p += 2
-            ciphers = [_u16(hello, i) for i in range(p, p + n, 2)]; p += n
-            p += 1 + hello[p]; n = _u16(hello, p); p += 2; end = p + n
-            exts = []; alpn = []; groups = []
+            legacy = _u16(hello, p)
+            p += 34
+            p += 1 + hello[p]
+            n = _u16(hello, p)
+            p += 2
+            ciphers = [_u16(hello, i) for i in range(p, p + n, 2)]
+            p += n
+            p += 1 + hello[p]
+            n = _u16(hello, p)
+            p += 2
+            end = p + n
+            exts = []
+            alpn = []
+            groups = []
             while p < end:
-                t = _u16(hello, p); ln = _u16(hello, p + 2); p += 4
-                v = hello[p:p + ln]; p += ln; exts.append(t)
+                t = _u16(hello, p)
+                ln = _u16(hello, p + 2)
+                p += 4
+                v = hello[p:p + ln]
+                p += ln
+                exts.append(t)
                 if t == 10:
                     groups = [_u16(v, i) for i in range(2, len(v), 2)]
                 elif t == 16:
                     q = 2
                     while q < len(v):
-                        sz = v[q]; q += 1; alpn.append(v[q:q + sz].decode()); q += sz
+                        sz = v[q]
+                        q += 1
+                        alpn.append(v[q:q + sz].decode())
+                        q += sz
             ja3 = ",".join([
                 str(legacy),
                 "-".join(str(x) for x in ciphers if not _grease(x)),
