@@ -574,6 +574,10 @@ def fetch_account_quota(
         "projectId": project_id,
         "plan": plan,
         "groups": groups,
+        # Drop the error when parsing recovered partial data: a group list with
+        # a stale error is more confusing than the error alone, and the partial
+        # groups are the more useful fact. The error surfaces only when nothing
+        # parsed, so an unknown quota stays visibly unknown.
         "groupError": summary_err if (summary_err and not groups) else None,
         "models": models,
         "modelsError": models_err if (models_err and not models) else None,

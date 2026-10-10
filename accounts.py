@@ -291,7 +291,7 @@ class AntigravityAccountRegistry:
         for account in self.list_accounts():  # least-recently-used first
             if account.account_id in tried:
                 continue
-            if not account.credentials.get("access_token") and not account.has_refresh_token():
+            if not account.credentials.get("access_token") and not account.has_refresh_token:
                 continue
             self.set_active(account.account_id)
             return account

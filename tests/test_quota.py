@@ -241,6 +241,83 @@ def test_best_model_row_no_match_is_none():
     assert best_model_row([], "gemini-3.8-flash") is None
 
 
+# ── edge cases (review follow-up) ───────────────────────────────────
+
+
+def test_clamp_fraction_infinity_is_none_not_one():
+    """A non-finite fraction must stay unknown, not clamp to 1.0.
+
+    ``min(max(inf, 0.0), 1.0)`` would silently read as 'full quota', which is
+    the one value we must never fabricate. NaN likewise yields None.
+    """
+    assert clamp_fraction(float("inf")) is None
+    assert clamp_fraction(float("-inf")) is None
+    assert clamp_fraction(float("nan")) is None
+
+
+def test_format_reset_naive_timestamp_is_treated_as_utc():
+    """A timestamp without a tz marker is read as UTC, not local time.
+
+    ``format_reset`` fills a missing tz with UTC before computing the delta, so
+    a naive ISO string measures the same regardless of the host's local zone.
+    """
+    # 2099-01-01T00:00:00Z minus a fixed 'now' exactly 3 days earlier.
+    now = 4_070_649_600.0  # 2098-12-29T00:00:00Z
+    out = format_reset("2099-01-01T00:00:00", now=now)
+    assert out == "3d 0h"
+
+
+def test_best_model_row_prefix_tie_prefers_deterministic_order():
+    """Two prefix matches with equal quota: the first in list order wins.
+
+    Not the most-quota rule (they tie), but a stable pick — never a random one.
+    """
+    rows = [
+        {"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.5,
+         "resetTime": None, "isExhausted": False, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False},
+        {"modelId": "gemini-3.8-flash-high", "remainingFraction": 0.5,
+         "resetTime": None, "isExhausted": False, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False},
+    ]
+    row = best_model_row(rows, "gemini-3.8-flash")
+    assert row is not None
+    assert row["modelId"] == "gemini-3.8-flash-low"
+
+
+def test_plan_label_paid_tier_with_id_but_no_name():
+    """A paid tier carrying only an id (no name) does not label as that tier.
+
+    ``plan_label`` prefers a tier with a human name; a bare-id paid tier falls
+    back to the current tier's label. Assert that fallback rather than a
+    fabricated label from the id alone.
+    """
+    current = {"id": "free", "name": "Free"}
+    paid = {"id": "pro"}  # no 'name'
+    label = plan_label(current, paid)
+    assert label == "Free (free)"
+
+
+def test_format_quota_report_license_error_becomes_paid_note():
+    """A license/subscription error is explained as the paid-tier note.
+
+    ``_group_error_note`` maps license/subscription_required/3501 errors to the
+    pedagogical 'needs a paid subscription' note rather than echoing the raw
+    relay error, which is the more useful operator fact. Assert the note, and
+    that per-model quota is still reported as live.
+    """
+    report = format_quota_report(
+        account_email="op@example.com",
+        plan=None,
+        groups=[],
+        models=[],
+        group_error="license: check your workspace license",
+        now=0.0,
+    )
+    assert "paid subscription" in report.lower()
+    assert "per-model quota below is still live" in report.lower()
+
+
 # ── quota_is_low (the proactive-failover predicate) ─────────────────────────
 
 def test_quota_is_low_zero_fraction():
@@ -612,6 +689,110 @@ def test_generate_uses_switched_token_when_quota_empty():
         "request must carry the switched account's bearer, not the exhausted one")
 
 
+def test_switched_account_project_id_is_new_not_stale():
+    """Bug regression: after a proactive switch the request must carry the NEW
+    account's project_id, not the old one.
+
+    ``generate`` used to re-read project_id from ``self.auth.get_credentials()``,
+    but the manager stays bound to the previous (exhausted) account, so the
+    request went out with the new account's token and the OLD account's project
+    — a mismatch that 404s or misattributes quota. Assert the payload carries
+    the switched account's project (``proj-first``), not ``proj-active``.
+    """
+    import json as _json
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+
+    exhausted_snap = _snapshot([
+        {"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.0,
+         "resetTime": None, "isExhausted": True, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False}])
+
+    sse = [b'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n',
+           b"data: [DONE]\n\n"]
+    mock_resp = MagicMock()
+    mock_resp.__iter__.return_value = sse
+    mock_resp.status = 200
+
+    captured = {}
+
+    def _capture(req, timeout=None):
+        captured["auth"] = req.headers.get("Authorization")
+        captured["body"] = req.data
+        return mock_resp
+
+    with patch("client.fetch_account_quota", return_value=exhausted_snap), \
+         patch("urllib.request.urlopen", side_effect=_capture):
+        client.chat.completions.create(
+            model="gemini-3.8-flash",
+            messages=[{"role": "user", "content": "hi"}],
+            stream=False,
+        )
+
+    assert captured["auth"] == "Bearer tok-first"
+    payload = _json.loads(captured["body"].decode("utf-8"))
+    assert payload.get("project") == "proj-first", (
+        "request must carry the switched account's project, not the stale one")
+
+
+def test_failover_refreshes_the_new_accounts_refresh_token():
+    """Bug regression: reactive 429 failover must exchange the NEW account's
+    refresh token, not the exhausted account's.
+
+    The target account has no access_token (only a refresh token). The old code
+    called ``self.auth.refresh_access_token()``, but the manager is still bound
+    to the exhausted account, so it exchanged the OLD refresh token and handed
+    back the OLD token — the failover retried the wall it was meant to escape.
+    Assert the exchange used the second account's refresh token.
+    """
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    sandbox = Path(tempfile.mkdtemp())
+    from accounts import AntigravityAccountRegistry
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("exhausted@example.com", {
+        "access_token": "tok-exhausted", "refresh_token": "rt-old",
+        "expires_at": 9e9, "project_id": "proj-old"})
+    # Target account: refresh-token only, so failover must mint a token for IT.
+    reg.add_account("target@example.com", {
+        "access_token": "", "refresh_token": "rt-new",
+        "expires_at": 9e9, "project_id": "proj-new"})
+
+    client = _client_for(reg)
+
+    # In the real request flow, the active (exhausted) account is already in
+    # tried_account_ids before failover runs, so the target is the only untried
+    # one. Mirror that here: add the exhausted account's id to the tried set.
+    exhausted_id = reg.get_account("exhausted@example.com").account_id
+    target_id = reg.get_account("target@example.com").account_id
+
+    seen_refresh = {}
+
+    def _fake_refresh(self):
+        # The failover builds a fresh manager pinned to the target account, so
+        # ``self`` here is that new-account manager. Assert its refresh token
+        # is the target's, proving the exchange targeted the right account.
+        seen_refresh["token"] = self.credentials.get("refresh_token")
+        seen_refresh["account_id"] = self.account_id
+        return "tok-target"
+
+    with patch("auth.AntigravityAuthManager.refresh_access_token", _fake_refresh):
+        token = client._failover_to_next_account({exhausted_id})
+
+    assert token == "tok-target"
+    assert seen_refresh.get("token") == "rt-new", (
+        "failover must exchange the TARGET account's refresh token, not the exhausted one")
+    assert seen_refresh.get("account_id") == target_id, (
+        "the refresh must be pinned to the target account, not the exhausted one")
+
+
 def test_get_registry_reads_the_real_attribute():
     """Regression: the auth manager stores its registry as ``_registry``.
 
@@ -858,3 +1039,193 @@ def _capture(fn, *args):
     with redirect_stdout(buf):
         fn(*args)
     return buf.getvalue()
+
+
+# ── _cli_quota (auth.py quota command) ──────────────────────────────
+
+
+def _registry_empty(sandbox: Path):
+    from accounts import AntigravityAccountRegistry
+    return AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+
+
+def test_cli_quota_reports_no_accounts():
+    """Empty registry: reported as 'no accounts', not as 0% quota."""
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _registry_empty(sandbox)
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota"]
+    try:
+        out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    assert "no accounts" in out.lower()
+
+
+def test_cli_quota_json_error_when_no_accounts():
+    """--json emits a machine-readable error object, not a crash."""
+    import json as _json
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _registry_empty(sandbox)
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota", "--json"]
+    try:
+        out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    payload = _json.loads(out)
+    assert payload["ok"] is False
+    assert "no accounts" in payload["error"].lower()
+
+
+def test_cli_quota_reports_credentials_failure():
+    """Credential resolution failure is surfaced, not shown as 0% left."""
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj"})
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota"]
+    try:
+        with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls:
+            mgr_cls.return_value.get_credentials.side_effect = RuntimeError("no refresh token")
+            out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    assert "credentials" in out.lower()
+    assert "no refresh token" in out
+
+
+def test_cli_quota_reports_fetch_failure():
+    """An unreachable relay is reported as unreachable, not as exhausted quota."""
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj"})
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota"]
+    try:
+        with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+             patch("models.fetch_account_quota", side_effect=RuntimeError("relay down")):
+            mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+            out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    assert "unreachable" in out.lower()
+    assert "relay down" in out
+
+
+def test_cli_quota_json_prints_snapshot():
+    """--json on success prints the raw snapshot as machine-readable JSON."""
+    import json as _json
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj"})
+
+    snapshot = {
+        "email": "operator@example.com", "projectId": "proj", "plan": None,
+        "groups": [], "groupError": None, "modelsError": None,
+        "models": [{"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.5,
+                    "resetTime": None, "isExhausted": False, "displayName": None,
+                    "supportsThinking": False, "supportsImages": False,
+                    "recommended": True}],
+        "fetchedAt": 0.0,
+    }
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota", "--json"]
+    try:
+        with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+             patch("models.fetch_account_quota", return_value=snapshot):
+            mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+            out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    payload = _json.loads(out)
+    assert payload["models"][0]["modelId"] == "gemini-3.8-flash-low"
+    assert payload["models"][0]["remainingFraction"] == 0.5
+
+
+def test_cli_quota_text_prints_report():
+    """Default (text) output renders the human report, not raw JSON."""
+    import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    import auth as auth_mod
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj"})
+
+    snapshot = {
+        "email": "operator@example.com", "projectId": "proj", "plan": None,
+        "groups": [], "groupError": None, "modelsError": None,
+        "models": [{"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.5,
+                    "resetTime": None, "isExhausted": False, "displayName": None,
+                    "supportsThinking": False, "supportsImages": False,
+                    "recommended": True}],
+        "fetchedAt": 0.0,
+    }
+
+    argv = _sys.argv
+    _sys.argv = ["auth.py", "quota"]
+    try:
+        with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+             patch("models.fetch_account_quota", return_value=snapshot):
+            mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+            out = _capture(auth_mod._cli_quota, reg)
+    finally:
+        _sys.argv = argv
+
+    assert "Antigravity quota" in out
+    assert "gemini-3.8-flash-low" in out

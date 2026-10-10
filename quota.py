@@ -22,9 +22,9 @@ low fraction on one row does not mean that model alone is nearly exhausted.
 from __future__ import annotations
 
 import math
+import time
+from datetime import datetime, timezone
 from typing import Any
-
-logger = __import__("logging").getLogger(__name__)
 
 
 # ── Pure parsing ───────────────────────────────────────────────────────────
@@ -215,7 +215,6 @@ def format_reset(reset_time: str | None, now: float) -> str:
     """
     if not reset_time:
         return "n/a"
-    from datetime import datetime, timezone
 
     try:
         clean = reset_time.strip()
@@ -326,8 +325,6 @@ def format_quota_report(
     now: float,
 ) -> str:
     """The operator-facing quota report (also the ``auth.py quota`` output)."""
-    import time as _time
-
     lines: list[str] = []
     lines.append("Antigravity quota")
     if account_email:
@@ -374,7 +371,7 @@ def format_quota_report(
         lines.append("No per-model quota returned.")
 
     lines.append("")
-    lines.append(f"Fetched: {_time.strftime('%Y-%m-%d %H:%M:%S', _time.localtime(now))}")
+    lines.append(f"Fetched: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
     return "\n".join(lines).rstrip()
 
 
