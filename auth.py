@@ -736,6 +736,67 @@ def _register_removal_step() -> bool:
         return False
 
 
+def _cli_quota(registry: AntigravityAccountRegistry) -> None:
+    """``auth.py quota [--json]`` — measure the active account's remaining quota.
+
+    Read-only: this never touches the registry or a token, it only reports what
+    Antigravity currently says. An unreachable relay or an unauthenticated
+    account is reported as such rather than shown as "0% left" — an unknown
+    quota must stay visibly unknown.
+    """
+    import sys as _sys
+
+    want_json = "--json" in _sys.argv[2:]
+
+    account = registry.get_account()
+    if account is None:
+        if registry.account_count == 0:
+            msg = "no accounts registered"
+        else:
+            msg = "no active account"
+        if want_json:
+            print(json.dumps({"ok": False, "error": msg}, indent=2))
+        else:
+            print(f"Quota: {msg}.")
+            print("      Run 'hermes auth add antigravity --type oauth' to authenticate an account")
+        return
+
+    mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
+    try:
+        token, project_id = mgr.get_credentials()
+    except Exception as exc:
+        if want_json:
+            print(json.dumps({"ok": False, "error": f"credentials unavailable: {exc}"}, indent=2))
+        else:
+            print(f"Quota: could not resolve credentials for {account.email} ({exc}).")
+        return
+
+    from models import fetch_account_quota
+    import quota as _quota_mod
+
+    try:
+        snapshot = fetch_account_quota(token, project_id, email=account.email)
+    except Exception as exc:
+        if want_json:
+            print(json.dumps({"ok": False, "error": f"quota fetch failed: {exc}"}, indent=2))
+        else:
+            print(f"Quota: Antigravity unreachable ({exc}).")
+        return
+
+    if want_json:
+        print(json.dumps(snapshot, indent=2))
+        return
+
+    print(_quota_mod.format_quota_report(
+        account_email=account.email,
+        plan=snapshot.get("plan"),
+        groups=snapshot.get("groups", []),
+        models=snapshot.get("models", []),
+        group_error=snapshot.get("groupError"),
+        now=snapshot.get("fetchedAt", time.time()),
+    ))
+
+
 def cli_main() -> None:
     """CLI entry point for account management (fallback when hermes auth is unavailable)."""
     import sys
@@ -773,6 +834,9 @@ def cli_main() -> None:
             print(f"Status  : Not connected ({e})")
             print(f"Account : {account.email}")
             print(f"ID      : {account.account_id}")
+
+    elif args[0] == "quota":
+        _cli_quota(registry)
 
     elif args[0] in ("list", "ls"):
         accounts = registry.list_accounts()
@@ -827,6 +891,7 @@ def cli_main() -> None:
         print("Commands (fallback — prefer 'hermes auth add antigravity'):")
         print("  login [email]     Authenticate a new account (or re-authenticate)")
         print("  status            Show the active account status")
+        print("  quota [--json]    Measure remaining quota for the active account")
         print("  list              List all accounts")
         print("  switch <email>    Switch the active account")
         print("  remove <email>    Remove an account")

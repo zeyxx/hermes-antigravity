@@ -141,6 +141,10 @@ Authenticate or inspect status at any time:
 # Check status
 python3 ~/.hermes/plugins/model-providers/antigravity/auth.py status
 
+# Measure remaining quota (read-only; also prints as JSON with --json)
+python3 ~/.hermes/plugins/model-providers/antigravity/auth.py quota
+python3 ~/.hermes/plugins/model-providers/antigravity/auth.py quota --json
+
 # Run interactive OAuth login
 python3 ~/.hermes/plugins/model-providers/antigravity/auth.py
 ```

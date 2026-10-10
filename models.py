@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import platform
+import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -13,6 +15,10 @@ try:
     from .accounts import HERMES_ROOT
 except ImportError:
     from accounts import HERMES_ROOT
+try:
+    from . import quota as _quota
+except ImportError:
+    import quota as _quota
 
 logger = logging.getLogger(__name__)
 
@@ -435,3 +441,142 @@ def fetch_available_models(
     # Keep FALLBACK_MODELS for compatibility/tests, but never advertise it as
     # a live catalog when Antigravity cannot confirm availability.
     return []
+
+
+# ── Quota measurement (imperative shell) ───────────────────────────────────
+# The pure parsers live in quota.py. This section is the only place that opens
+# a socket for quota: it calls the three Antigravity RPCs that carry usage
+# facts and hands each response to a pure parser. No quota arithmetic happens
+# here, so the wire shape and the maths can change independently.
+
+
+def _post_json(
+    path: str,
+    token: str,
+    body: dict[str, Any],
+    timeout: float,
+    endpoints: list[str] | None = None,
+) -> dict[str, Any]:
+    """POST one v1internal RPC across candidate endpoints; return parsed JSON.
+
+    Mirrors the failover discipline of fetch_available_models: 403/404/429/5xx
+    move to the next candidate rather than raising, because the daily and the
+    production hosts do not always agree on availability. Any other status is a
+    real error and propagates.
+    """
+    candidates = endpoints or ENDPOINT_FALLBACKS
+    last_error = "no endpoint available"
+    for endpoint in candidates:
+        url = f"{endpoint}{path}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": DEFAULT_USER_AGENT,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    last_error = f"{endpoint} returned non-JSON: {exc}"
+                    continue
+                return data if isinstance(data, dict) else {}
+        except urllib.error.HTTPError as err:
+            body_text = ""
+            try:
+                body_text = err.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            last_error = f"{endpoint} HTTP {err.code}: {body_text[:200]}"
+            if err.code in (403, 404, 429, 500, 502, 503, 504):
+                continue
+            raise
+        except Exception as exc:
+            last_error = f"{endpoint}: {exc}"
+            continue
+    raise RuntimeError(f"{path} failed: {last_error}")
+
+
+def _post_json_safe(
+    path: str,
+    token: str,
+    body: dict[str, Any],
+    timeout: float,
+    endpoints: list[str] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Best-effort ``_post_json``: (data, error). Never raises.
+
+    The aggregate quota summary is subscription-gated; a failure there must not
+    sink the per-model quota or the tier, which are always available. This is
+    the seam that keeps one gated RPC from blocking the whole measurement.
+    """
+    try:
+        return _post_json(path, token, body, timeout, endpoints), None
+    except Exception as exc:
+        logger.debug("%s unavailable: %s", path, exc)
+        return None, str(exc)
+
+
+def fetch_account_quota(
+    token: str,
+    project_id: str,
+    timeout: float = 8.0,
+    endpoints: list[str] | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Measure one account's Antigravity quota from the three usage RPCs.
+
+    Sources, all parsed by quota.py:
+
+    - ``v1internal:fetchAvailableModels`` — per-model remainingFraction/resetTime
+    - ``v1internal:retrieveUserQuotaSummary`` — aggregate groups (paid only)
+    - ``v1internal:loadCodeAssist`` — currentTier/paidTier (the plan label)
+
+    Returns a dict shaped for both the CLI report and the proactive failover in
+    client.py: ``models`` rows each carry the quota facts, ``groups`` carries
+    the aggregate view, and ``groupError`` records why the aggregate is missing
+    rather than letting an empty list masquerade as "no quota". A quota summary
+    that 403s on a free tier is the expected path, not an error state.
+    """
+    models_data, models_err = _post_json_safe(
+        "/v1internal:fetchAvailableModels",
+        token,
+        {"project": project_id},
+        timeout,
+        endpoints,
+    )
+    summary_data, summary_err = _post_json_safe(
+        "/v1internal:retrieveUserQuotaSummary", token, {}, timeout, endpoints
+    )
+    assist_data, _assist_err = _post_json_safe(
+        "/v1internal:loadCodeAssist",
+        token,
+        {"metadata": {"ideType": "ANTIGRAVITY", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"}},
+        timeout,
+        endpoints,
+    )
+
+    models = _quota.parse_models_quota(models_data) if models_data else []
+    groups = _quota.parse_quota_groups(summary_data) if summary_data else []
+    plan = None
+    if assist_data:
+        plan = _quota.plan_label(assist_data.get("currentTier"), assist_data.get("paidTier"))
+
+    return {
+        "email": email,
+        "projectId": project_id,
+        "plan": plan,
+        "groups": groups,
+        "groupError": summary_err if (summary_err and not groups) else None,
+        "models": models,
+        "modelsError": models_err if (models_err and not models) else None,
+        "fetchedAt": time.time(),
+    }
+

@@ -66,6 +66,9 @@ merely renamed in the same diff.
 | Text sanitising | `sanitizeText`, unpaired surrogates only | same | 0.9.0 / #9 | 2026-10-05 |
 | `$ref` schema resolution | local pointers, cyclic-safe | **port only** — see below | — | 2026-10-05 |
 | Quota failover | `failoverToNextAccount` | `next_untried_account` | 0.8.0 / #13 | 2026-10-05 |
+| Per-model quota (`quotaInfo`) | `remainingFraction`, `resetTime` | parsed in `quota.py`, measured via `fetch_account_quota` | 0.10.0 | 2026-10-10 |
+| Aggregate quota (`retrieveUserQuotaSummary`) | groups/buckets, 403 on free-tier | `quota.parse_quota_groups`, best-effort | 0.10.0 | 2026-10-10 |
+| Plan tier (`paidTier` over `currentTier`) | `planLabel` | `quota.plan_label` | 0.10.0 | 2026-10-10 |
 
 ## Known divergences (read before porting)
 

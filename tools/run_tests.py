@@ -37,6 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULES = (
     "tests.test_translator",
     "tests.test_models",
+    "tests.test_quota",
     "tests.test_accounts",
     "tests.test_auth",
     "tests.test_client",
