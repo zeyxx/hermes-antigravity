@@ -19,21 +19,22 @@ from models import (
 
 
 def test_wire_fingerprint_matches_official_cli():
-    """Pin the CLI wire fingerprint to the value pi-antigravity ships.
+    """Pin the CLI wire fingerprint to the value the official CLI sends.
 
     This is a drift detector, not a style assertion. The relay scores
-    requests on this fingerprint; when upstream bumps the CLI version or
+    requests on this fingerprint; when the official CLI bumps the version or
     build number and this port does not, requests degrade silently rather
     than failing loudly. Bump CLI_VERSION/CLI_BUILD in models.py in the
-    same change when pi-antigravity moves (upstream 0.8.1 / PR #63 did).
+    same change when the official CLI moves (measured 1.3.3 / cl=996823801,
+    captured 2026-10-10 via local MITM proxy).
     """
-    assert CLI_VERSION == "1.2.4", (
-        "Antigravity CLI version drifted from pi-antigravity; update models.py")
-    assert CLI_BUILD == "982146307", (
-        "Antigravity CLI build number drifted from pi-antigravity; update models.py")
+    assert CLI_VERSION == "1.3.3", (
+        "Antigravity CLI version drifted from the official CLI; update models.py")
+    assert CLI_BUILD == "996823801", (
+        "Antigravity CLI build number drifted from the official CLI; update models.py")
     ua = DEFAULT_USER_AGENT
-    assert ua.startswith("antigravity/cli/1.2.4 (")
-    assert "cl=982146307" in ua
+    assert ua.startswith("antigravity/cli/1.3.3 (")
+    assert "cl=996823801" in ua
     assert "auth_method=consumer" in ua
 
 
@@ -219,12 +220,17 @@ def test_minimum_core_version_is_declared():
 
 
 def _tracker_row(tracker, field_prefix):
-    """Return the upstream and port cells of a tracker row."""
+    """Return the official-CLI and port cells of a tracker row.
+
+    The tracker now has three reference columns: Official CLI (index 0),
+    pi-antigravity (index 1), hermes-antigravity (index 2). The port must
+    track the official CLI, so that is the cell compared against.
+    """
     for line in tracker.splitlines():
         if line.startswith("|") and field_prefix in line:
             cells = [c.strip() for c in line.strip("|").split("|")]
-            if len(cells) >= 2:
-                return cells[1], cells[2]
+            if len(cells) >= 4:
+                return cells[1], cells[3]
     raise AssertionError(f"tracker row starting with {field_prefix!r} not found")
 
 

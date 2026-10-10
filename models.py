@@ -17,8 +17,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-CLI_VERSION = "1.2.4"
-CLI_BUILD = "982146307"
+CLI_VERSION = "1.3.3"
+CLI_BUILD = "996823801"
 
 
 def get_user_agent() -> str:

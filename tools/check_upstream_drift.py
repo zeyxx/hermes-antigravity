@@ -47,6 +47,13 @@ from typing import Any
 UPSTREAM_URL = "https://github.com/Rahularya01/pi-antigravity.git"
 UPSTREAM_REF = "main"
 
+# Official CLI fingerprint, measured 2026-10-10 by capturing the live
+# User-Agent via a local MITM proxy (see UPSTREAM_DRIFT.md). The port must
+# track the official CLI, not pi-antigravity, which is a reimplementation
+# that may lag behind the binary Google ships.
+OFFICIAL_CLI_VERSION = "1.3.3"
+OFFICIAL_CLI_BUILD = "996823801"
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Divergences that are intentional. Keys are field names.
@@ -193,15 +200,36 @@ def read_port() -> dict[str, Any]:
 def compare(upstream: dict[str, Any], port: dict[str, Any]) -> dict[str, Any]:
     findings: dict[str, Any] = {"mismatch": [], "missing": [], "extra": []}
 
-    for field in ("cli_version", "cli_build", "redirect_uri"):
-        if upstream.get(field) != port.get(field):
-            findings["mismatch"].append(
-                {
-                    "field": field,
-                    "upstream": upstream.get(field),
-                    "port": port.get(field),
-                }
-            )
+    # The CLI fingerprint is compared to the official CLI (measured), not to
+    # pi-antigravity, which is a reimplementation that may lag behind the
+    # binary Google ships. The port must track the official CLI.
+    if port.get("cli_version") != OFFICIAL_CLI_VERSION:
+        findings["mismatch"].append(
+            {
+                "field": "cli_version",
+                "upstream": OFFICIAL_CLI_VERSION,
+                "port": port.get("cli_version"),
+            }
+        )
+    if port.get("cli_build") != OFFICIAL_CLI_BUILD:
+        findings["mismatch"].append(
+            {
+                "field": "cli_build",
+                "upstream": OFFICIAL_CLI_BUILD,
+                "port": port.get("cli_build"),
+            }
+        )
+
+    # The remaining fields are still compared to pi-antigravity, which is the
+    # reference implementation for the protocol (scopes, redirect, enums).
+    if upstream.get("redirect_uri") != port.get("redirect_uri"):
+        findings["mismatch"].append(
+            {
+                "field": "redirect_uri",
+                "upstream": upstream.get("redirect_uri"),
+                "port": port.get("redirect_uri"),
+            }
+        )
 
     if upstream.get("scopes") != port.get("scopes"):
         findings["mismatch"].append(
@@ -269,7 +297,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"upstream pi-antigravity @ {commit}")
         print(f"port      {REPO_ROOT.name}")
-        for field in ("cli_version", "cli_build", "redirect_uri", "scopes"):
+        # Fingerprint compared to official CLI (measured), not pi-antigravity.
+        for field, official in (("cli_version", OFFICIAL_CLI_VERSION), ("cli_build", OFFICIAL_CLI_BUILD)):
+            pt = port.get(field)
+            mark = "OK  " if pt == official else "DIFF"
+            print(f"  {mark} {field}: {pt} (official {official})")
+        for field in ("redirect_uri", "scopes"):
             up, pt = upstream.get(field), port.get(field)
             mark = "OK  " if up == pt else "DIFF"
             shown = up if isinstance(up, str) else f"{len(up or [])} scopes"
