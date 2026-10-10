@@ -280,6 +280,30 @@ def best_model_row(
     return max(prefixed, key=_key)
 
 
+def quota_is_low(row: dict[str, Any] | None, threshold: float = 0.0) -> bool:
+    """True when this model's bucket is too empty to be worth a request.
+
+    ``threshold`` is a remaining fraction, not a percentage: 0.0 switches only
+    on a bucket the relay reports as empty, which is the conservative default —
+    a low-but-nonzero bucket may still serve a request, and the existing 429
+    backstop catches the case where it cannot. An operator who wants to bail
+    earlier raises it (e.g. 0.05 to switch below 5% left).
+
+    An unknown row (None, or a missing fraction) is never "low": a quota we
+    cannot read must not be treated as an exhausted one.
+    """
+    if row is None:
+        return False
+    if row.get("isExhausted") is True:
+        return True
+    remaining = row.get("remainingFraction")
+    if remaining is None:
+        return False
+    if isinstance(remaining, bool) or not isinstance(remaining, (int, float)):
+        return False
+    return float(remaining) <= threshold
+
+
 # ── Formatting ─────────────────────────────────────────────────────────────
 
 

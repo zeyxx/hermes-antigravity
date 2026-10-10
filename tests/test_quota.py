@@ -23,6 +23,7 @@ from quota import (
     format_reset,
     progress_bar,
     best_model_row,
+    quota_is_low,
     format_quota_report,
 )
 
@@ -242,6 +243,34 @@ def test_best_model_row_no_match_is_none():
     assert best_model_row([], "gemini-3.8-flash") is None
 
 
+# ── quota_is_low (the proactive-failover predicate) ─────────────────────────
+
+def test_quota_is_low_zero_fraction():
+    assert quota_is_low({"remainingFraction": 0.0}) is True
+
+
+def test_quota_is_low_exhausted_flag_even_with_nonzero_fraction():
+    assert quota_is_low({"remainingFraction": 0.3, "isExhausted": True}) is True
+
+
+def test_quota_is_low_nonzero_is_not_low_by_default():
+    """Default threshold is 0.0: a thin-but-usable bucket still gets its request."""
+    assert quota_is_low({"remainingFraction": 0.05}) is False
+    assert quota_is_low({"remainingFraction": 0.42}) is False
+
+
+def test_quota_is_low_respects_a_raised_threshold():
+    assert quota_is_low({"remainingFraction": 0.03}, threshold=0.05) is True
+    assert quota_is_low({"remainingFraction": 0.1}, threshold=0.05) is False
+
+
+def test_quota_is_low_unknown_is_never_low():
+    """An unreadable quota must not be treated as an exhausted one."""
+    assert quota_is_low(None) is False
+    assert quota_is_low({}) is False
+    assert quota_is_low({"remainingFraction": None}) is False
+
+
 # ── report formatting ──────────────────────────────────────────────────────
 
 def test_format_quota_report_renders_models_and_groups():
@@ -417,3 +446,241 @@ def test_fetch_available_models_still_records_quota_enums():
         assert models_mod.get_model_enum("gemini-3.8-flash-low") == "MODEL_PLACEHOLDER_M320"
     finally:
         _restore(models_mod, original)
+
+
+# ── proactive failover (client._switch_account_if_quota_low) ────────────────
+
+
+def _two_account_registry(sandbox: Path):
+    """A registry with two usable accounts; the last-added one is active.
+
+    ``add_account`` makes the newly added account active, so ``fresh`` ends up
+    active. The switch test therefore expects a move to the *other* account.
+    """
+    from accounts import AntigravityAccountRegistry
+
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("first@example.com", {
+        "access_token": "tok-first", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj-first"})
+    reg.add_account("active@example.com", {
+        "access_token": "tok-active", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj-active"})
+    return reg
+
+
+def _client_for(reg):
+    """A client whose auth manager is bound to the given registry."""
+    from unittest.mock import MagicMock
+    from client import AntigravityClient
+    from auth import AntigravityAuthManager
+
+    mgr = AntigravityAuthManager(registry=reg)
+    # get_credentials must hand back the ACTIVE account's token so a switch is
+    # observable; the manager updates its credentials when the registry switches.
+    mgr.get_credentials = MagicMock(
+        side_effect=lambda: (
+            mgr.credentials.get("access_token"),
+            mgr.credentials.get("project_id", "antigravity-default"),
+        )
+    )
+    return AntigravityClient(auth_manager=mgr, endpoints=["https://only.example"])
+
+
+def _snapshot(models):
+    return {"email": None, "projectId": None, "plan": None, "groups": [],
+            "groupError": None, "models": models, "modelsError": None,
+            "fetchedAt": 0.0}
+
+
+def test_proactive_switch_fires_when_active_quota_empty():
+    """An empty bucket on the active account must switch before sending."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+
+    exhausted_snap = _snapshot([
+        {"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.0,
+         "resetTime": None, "isExhausted": True, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False}])
+
+    with patch("client.fetch_account_quota", return_value=exhausted_snap) as probe:
+        token = client._switch_account_if_quota_low("gemini-3.8-flash-low", set())
+
+    assert probe.called, "quota must be probed before deciding to switch"
+    assert token == "tok-first", "must switch to the other account's token"
+    assert reg.active_account_id != reg.get_account("active@example.com").account_id
+
+
+def test_proactive_switch_skipped_when_quota_remains():
+    """A bucket with quota left must NOT trigger a switch (threshold 0.0)."""
+    import tempfile
+    from pathlib import Path
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+    before = reg.active_account_id
+
+    healthy_snap = _snapshot([
+        {"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.42,
+         "resetTime": None, "isExhausted": False, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False}])
+
+    with patch("client.fetch_account_quota", return_value=healthy_snap):
+        token = client._switch_account_if_quota_low("gemini-3.8-flash-low", set())
+
+    assert token is None
+    assert reg.active_account_id == before, "a usable bucket must not switch accounts"
+
+
+def test_proactive_switch_skipped_with_single_account():
+    """One account has nowhere to switch to; the probe must not even run."""
+    import tempfile
+    from pathlib import Path
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("only@example.com", {
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj"})
+    client = _client_for(reg)
+
+    with patch("client.fetch_account_quota") as probe:
+        token = client._switch_account_if_quota_low("gemini-3.8-flash-low", set())
+
+    assert not probe.called, "a single account must not pay a quota-probe round-trip"
+    assert token is None
+
+
+def test_proactive_switch_survives_a_quota_probe_failure():
+    """A flaky/unreachable quota read must never block the request."""
+    import tempfile
+    from pathlib import Path
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+    before = reg.active_account_id
+
+    with patch("client.fetch_account_quota", side_effect=RuntimeError("network down")):
+        token = client._switch_account_if_quota_low("gemini-3.8-flash-low", set())
+
+    assert token is None
+    assert reg.active_account_id == before, "a failed probe must not move the account"
+
+
+def test_generate_uses_switched_token_when_quota_empty():
+    """End-to-end: generate() must send with the fresh account's token."""
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+
+    exhausted_snap = _snapshot([
+        {"modelId": "gemini-3.8-flash-low", "remainingFraction": 0.0,
+         "resetTime": None, "isExhausted": True, "displayName": None,
+         "supportsThinking": False, "supportsImages": False, "recommended": False}])
+
+    sse = [b'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n',
+           b"data: [DONE]\n\n"]
+    mock_resp = MagicMock()
+    mock_resp.__iter__.return_value = sse
+    mock_resp.status = 200
+
+    captured = {}
+
+    def _capture(req, timeout=None):
+        captured["auth"] = req.headers.get("Authorization")
+        return mock_resp
+
+    with patch("client.fetch_account_quota", return_value=exhausted_snap), \
+         patch("urllib.request.urlopen", side_effect=_capture):
+        client.chat.completions.create(
+            model="gemini-3.8-flash",
+            messages=[{"role": "user", "content": "hi"}],
+            stream=False,
+        )
+
+    assert captured["auth"] == "Bearer tok-first", (
+        "request must carry the switched account's bearer, not the exhausted one")
+
+
+def test_get_registry_reads_the_real_attribute():
+    """Regression: the auth manager stores its registry as ``_registry``.
+
+    Both failover paths used to read ``self.auth.registry`` — a public name the
+    manager never sets — so the lookup was always None and the 429 account
+    failover silently never fired. The switch was only observable once this
+    resolved the real ``_registry`` attribute.
+    """
+    import tempfile
+    from pathlib import Path
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+
+    assert client._get_registry() is reg
+    assert not hasattr(client.auth, "registry"), (
+        "the manager must not gain a public 'registry'; reading it was the bug")
+
+
+def test_reactive_429_failover_now_fires():
+    """The pre-existing 429 failover was dead (dead 'registry' accessor).
+
+    Guard the fix: a 429 on the active account must now actually switch to the
+    next linked account instead of silently burning the backoff.
+    """
+    import io
+    import json as _j
+    import tempfile
+    import urllib.error
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = _two_account_registry(sandbox)
+    client = _client_for(reg)
+    # two endpoints: the 429 path failovers account, then retries on the next
+    # candidate. A single endpoint would end the loop with nothing to retry.
+    client.endpoints = ["https://one.example", "https://two.example"]
+
+    def _http_error(code):
+        return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(b"{}"))
+
+    ok_resp = MagicMock()
+    ok_resp.__iter__.return_value = [
+        b'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n',
+        b"data: [DONE]\n\n"]
+    ok_resp.status = 200
+
+    calls = {"n": 0, "auth": []}
+
+    def _side(req, timeout=None):
+        calls["n"] += 1
+        calls["auth"].append(req.headers.get("Authorization"))
+        if calls["n"] == 1:
+            raise _http_error(429)   # first attempt hits the quota wall
+        return ok_resp               # second attempt (switched account) succeeds
+
+    # no proactive probe here: exercise the *reactive* path directly
+    with patch("client.fetch_account_quota", side_effect=AssertionError("no probe expected")), \
+         patch("urllib.request.urlopen", side_effect=_side):
+        client.chat.completions.create(
+            model="gemini-3.8-flash",
+            messages=[{"role": "user", "content": "hi"}],
+            stream=False,
+        )
+
+    assert calls["n"] == 2, "must retry once after the 429"
+    assert calls["auth"][0] != calls["auth"][1], (
+        "the retry must carry the OTHER account's bearer, proving failover fired")

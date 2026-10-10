@@ -21,7 +21,9 @@ try:
         clamp_max_tokens,
         resolve_session_trajectory,
         antigravity_request_envelope,
+        fetch_account_quota,
     )
+    from .quota import best_model_row, quota_is_low
     from .translator import (
         to_antigravity_payload,
         parse_sse_event,
@@ -39,7 +41,9 @@ except ImportError:
         clamp_max_tokens,
         resolve_session_trajectory,
         antigravity_request_envelope,
+        fetch_account_quota,
     )
+    from quota import best_model_row, quota_is_low
     from translator import (
         to_antigravity_payload,
         parse_sse_event,
@@ -248,6 +252,17 @@ class AntigravityClient:
         self.endpoints = endpoints or ENDPOINT_FALLBACKS
         self.chat = _ChatAdapter(self)
 
+    def _get_registry(self):
+        """The account registry behind the auth manager, or None.
+
+        The manager stores it as ``_registry`` (private). Reading a public
+        ``registry`` attribute here was a latent bug: it is always None, so the
+        quota failover never actually fired — the 429 path quietly degraded to
+        its backoff. Resolve the real attribute; keep the public name as a
+        forward-compatible fallback in case a core ever exposes one.
+        """
+        return getattr(self.auth, "_registry", None) or getattr(self.auth, "registry", None)
+
     def _failover_to_next_account(self, tried_account_ids: set[str]) -> str | None:
         """Switch to the next untried linked account after a quota wall.
 
@@ -255,7 +270,7 @@ class AntigravityClient:
         caller can rebuild the request with it. Returns None when there is
         nothing left to try, so the caller falls back to its backoff path.
         """
-        registry = getattr(self.auth, "registry", None)
+        registry = self._get_registry()
         if registry is None:
             return None
         try:
@@ -279,6 +294,65 @@ class AntigravityClient:
                 return None
         return str(access)
 
+    def _switch_account_if_quota_low(
+        self, runtime_model: str, tried_account_ids: set[str]
+    ) -> str | None:
+        """Proactively switch accounts when the active one's bucket is empty.
+
+        Reactive 429 failover is a safety net, not a strategy: it only fires
+        after a request has already failed, burning a round-trip and the
+        backoff budget on a wall the quota API reports for free. This reads the
+        per-model quota first and moves off an exhausted account before sending.
+
+        Guarded on purpose:
+        - it only runs with two or more linked accounts, because switching to
+          the same account is not a switch and a lone account has nowhere to go;
+        - it only counts an *empty* bucket (``remainingFraction`` at/below the
+          threshold, or ``isExhausted``) as low, so a thin-but-usable bucket
+          still gets its request and the 429 path remains the backstop;
+        - any failure to read quota is swallowed and returns None, so a flaky
+          measurement never blocks a request that would have succeeded.
+        """
+        registry = self._get_registry()
+        if registry is None:
+            return None
+        try:
+            if registry.account_count < 2:
+                return None
+        except Exception:
+            return None
+
+        try:
+            active_id = registry.active_account_id
+            if active_id:
+                tried_account_ids.add(active_id)
+            account = registry.get_account(active_id)
+            if account is None:
+                return None
+            creds = account.credentials or {}
+            token = creds.get("access_token")
+            if not token:
+                return None
+            snapshot = fetch_account_quota(
+                token,
+                creds.get("project_id", "antigravity-default"),
+                timeout=5.0,
+                email=account.email,
+            )
+        except Exception as exc:  # never fail a request over a quota probe
+            logger.debug("proactive quota probe unavailable: %s", exc)
+            return None
+
+        row = best_model_row(snapshot.get("models", []), runtime_model)
+        if not quota_is_low(row):
+            return None
+
+        logger.info(
+            "Antigravity quota empty for %s on %s; switching account before request",
+            runtime_model, account.email,
+        )
+        return self._failover_to_next_account(tried_account_ids)
+
     def generate(
         self,
         messages: list[dict[str, Any]],
@@ -296,6 +370,29 @@ class AntigravityClient:
 
         runtime_model = resolve_runtime_model(model, reasoning_effort)
         token, project_id = self.auth.get_credentials()
+
+        # Track accounts already tried this request, and — before spending a
+        # round-trip — move off an account whose quota for this model is already
+        # empty. Reactive 429 failover stays as the backstop; this avoids the
+        # failed request that would trigger it.
+        tried_accounts: set[str] = set()
+        registry = self._get_registry()
+        active_id = None
+        if registry is not None:
+            active_id = registry.active_account_id
+        if active_id:
+            tried_accounts.add(active_id)
+        switched_token = self._switch_account_if_quota_low(runtime_model, tried_accounts)
+        if switched_token:
+            token = switched_token
+            if registry is not None:
+                new_active = registry.active_account_id
+                if new_active:
+                    tried_accounts.add(new_active)
+            try:
+                _, project_id = self.auth.get_credentials()
+            except Exception:
+                pass  # keep the project id we already had
 
         trajectory = resolve_session_trajectory(messages, kwargs.get("session_id"))
         step = max(1, len(messages))
@@ -328,12 +425,6 @@ class AntigravityClient:
 
         response = None
         last_error = None
-        tried_accounts: set[str] = set()
-        active_id = getattr(getattr(self.auth, "registry", None), "_data", {}).get(
-            "active_account"
-        ) if getattr(self.auth, "registry", None) is not None else None
-        if active_id:
-            tried_accounts.add(active_id)
 
         for endpoint in self.endpoints:
             url = f"{endpoint}/v1internal:streamGenerateContent?alt=sse"
@@ -383,7 +474,7 @@ class AntigravityClient:
                     new_token = self._failover_to_next_account(tried_accounts)
                     if new_token:
                         token = new_token
-                        current = getattr(self.auth, "registry", None)
+                        current = self._get_registry()
                         if current is not None:
                             switched = current.get_account()
                             if switched is not None:
