@@ -10,11 +10,9 @@ import json as _json
 from pathlib import Path
 from unittest.mock import patch
 
-import quota
 from quota import (
     clamp_fraction,
     remaining_percent,
-    parse_quota_buckets,
     parse_quota_groups,
     parse_model_quota,
     parse_models_quota,
@@ -313,7 +311,7 @@ def test_format_quota_report_surfaces_subscription_gate():
 
 def test_format_quota_report_unknown_fraction_shows_question_mark():
     report = format_quota_report(
-        account_email=None, plan=None, groups=[], 
+        account_email=None, plan=None, groups=[],
         models=[{"modelId": "m", "displayName": None, "remainingFraction": None,
                  "resetTime": None, "isExhausted": False, "supportsThinking": False,
                  "supportsImages": False, "recommended": False}],
@@ -369,7 +367,7 @@ def test_fetch_account_quota_aggregates_three_rpcs():
     assist_payload = {"currentTier": {"id": "free-tier", "name": "Free tier"},
                       "paidTier": {"id": "g1-pro-tier", "name": "Google AI Pro"}}
 
-    models_mod, original = _seed_cache()
+    _, original = _seed_cache()
     try:
         def _fake_urlopen(req, timeout=None):
             path = req.full_url.split(".com")[-1]
@@ -408,7 +406,7 @@ def test_fetch_account_quota_survives_subscription_gated_summary():
         return urllib.error.HTTPError("https://x", code, "err", {},
                                       io.BytesIO(_json.dumps(payload).encode("utf-8")))
 
-    models_mod, original = _seed_cache()
+    _, original = _seed_cache()
     try:
         def _fake_urlopen(req, timeout=None):
             path = req.full_url.split(".com")[-1]
@@ -439,13 +437,14 @@ def test_fetch_available_models_still_records_quota_enums():
         "gemini-3.8-flash-low": {"model": "MODEL_PLACEHOLDER_M320",
                                  "quotaInfo": {"remainingFraction": 0.5}},
     }}
-    models_mod, original = _seed_cache()
+    _, original = _seed_cache()
     try:
         with patch("urllib.request.urlopen", return_value=_Resp(payload)):
             models_mod.fetch_available_models("tok", "proj")
         assert models_mod.get_model_enum("gemini-3.8-flash-low") == "MODEL_PLACEHOLDER_M320"
     finally:
         _restore(models_mod, original)
+
 
 
 # ── proactive failover (client._switch_account_if_quota_low) ────────────────
@@ -497,7 +496,6 @@ def test_proactive_switch_fires_when_active_quota_empty():
     """An empty bucket on the active account must switch before sending."""
     import tempfile
     from pathlib import Path
-    from unittest.mock import MagicMock
 
     sandbox = Path(tempfile.mkdtemp())
     reg = _two_account_registry(sandbox)
@@ -641,7 +639,6 @@ def test_reactive_429_failover_now_fires():
     next linked account instead of silently burning the backoff.
     """
     import io
-    import json as _j
     import tempfile
     import urllib.error
     from pathlib import Path
