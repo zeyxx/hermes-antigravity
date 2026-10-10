@@ -684,3 +684,180 @@ def test_reactive_429_failover_now_fires():
     assert calls["n"] == 2, "must retry once after the 429"
     assert calls["auth"][0] != calls["auth"][1], (
         "the retry must carry the OTHER account's bearer, proving failover fired")
+
+
+# ── hermes auth status antigravity (quota in the status surface) ────────────
+
+
+def _status_with_pool(entries, account, capsys=None):
+    """Drive _antigravity_auth_status with a stubbed credential pool.
+
+    Returns the printed lines. The pool module is swapped the way test_auth
+    does, so no real Hermes pool is touched.
+    """
+    import io as _io
+    import sys
+    from contextlib import redirect_stdout
+
+    import auth as auth_mod
+
+    class _Pool:
+        def entries(self):
+            return entries
+
+    fake = type(sys)("agent.credential_pool")
+    fake.load_pool = lambda name: _Pool()
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    buf = _io.StringIO()
+    try:
+        with redirect_stdout(buf), \
+             patch.object(auth_mod, "AntigravityAccountRegistry") as reg_cls, \
+             patch.object(auth_mod, "_print_quota_status") as quota_ln:
+            reg_cls.return_value.get_account.return_value = account
+            handled = auth_mod.antigravity_auth_handler(
+                "status", type("A", (), {"provider": "antigravity"})())
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
+    return handled, buf.getvalue(), quota_ln
+
+
+def _entry(expired=False):
+    import time as _t
+    from datetime import datetime, timezone
+    stamp = datetime.fromtimestamp(
+        _t.time() + (-3600 if expired else 3600), tz=timezone.utc).isoformat()
+    return type("E", (), {
+        "access_token": "ya29.x", "agent_key": "",
+        "expires_at": stamp, "base_url": "https://daily-cloudcode-pa.googleapis.com",
+    })()
+
+
+def test_status_owned_and_reproduces_pool_facts():
+    """Claiming status must still print the core's pool facts, not just quota."""
+    handled, out, _ = _status_with_pool([_entry()], account=_acct())
+    assert handled is True
+    assert "antigravity: logged in" in out
+    assert "accounts: 1" in out
+    assert "api_base_url" in out
+    assert "account: operator@example.com" in out
+
+
+def test_status_logged_out_when_pool_empty():
+    handled, out, quota_ln = _status_with_pool([], account=None)
+    assert handled is True
+    assert "logged out" in out
+    assert not quota_ln.called, "no quota probe when there is no live account"
+
+
+def test_status_logged_out_when_only_expired_entries():
+    handled, out, quota_ln = _status_with_pool([_entry(expired=True)], account=_acct())
+    assert handled is True
+    assert "logged out" in out
+    assert not quota_ln.called
+
+
+def _acct():
+    return type("A", (), {
+        "account_id": "acc1", "email": "operator@example.com",
+        "credentials": {"access_token": "tok", "project_id": "proj"},
+    })()
+
+
+def test_status_quota_probe_failure_never_breaks_status(capsys=None):
+    """A dead relay must degrade the quota line, not the whole status."""
+    import tempfile
+    from pathlib import Path
+
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt", "expires_at": 9e9,
+        "project_id": "proj"})
+    account = reg.get_account()
+
+    import auth as auth_mod
+    with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+         patch("models.fetch_account_quota", side_effect=RuntimeError("relay down")):
+        mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+        out = _capture(auth_mod._print_quota_status, reg, account)
+
+    assert "unavailable" in out
+    assert "relay down" in out
+
+
+def test_status_quota_summary_when_paid():
+    import tempfile
+    from pathlib import Path
+
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt", "expires_at": 9e9,
+        "project_id": "proj"})
+    account = reg.get_account()
+
+    snapshot = {
+        "plan": "Google AI Pro (g1-pro-tier)",
+        "groups": [{"displayName": "Gemini pool", "buckets": [
+            {"displayName": "Daily prompt", "remainingFraction": 0.42}]}],
+        "models": [], "groupError": None,
+    }
+    import auth as auth_mod
+    with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+         patch("models.fetch_account_quota", return_value=snapshot):
+        mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+        out = _capture(auth_mod._print_quota_status, reg, account)
+
+    assert "plan: Google AI Pro" in out
+    assert "Gemini pool" in out
+    assert "42.0%" in out
+
+
+def test_status_quota_freetier_falls_back_to_per_model():
+    import tempfile
+    from pathlib import Path
+
+    from accounts import AntigravityAccountRegistry
+
+    sandbox = Path(tempfile.mkdtemp())
+    reg = AntigravityAccountRegistry(registry_path=sandbox / "accounts.json")
+    reg.add_account("operator@example.com", {
+        "access_token": "tok", "refresh_token": "rt", "expires_at": 9e9,
+        "project_id": "proj"})
+    account = reg.get_account()
+
+    snapshot = {
+        "plan": "Free tier (free-tier)",
+        "groups": [],
+        "groupError": "endpoint HTTP 403: SUBSCRIPTION_REQUIRED",
+        "models": [
+            {"modelId": "m1", "remainingFraction": 0.0, "isExhausted": True},
+            {"modelId": "m2", "remainingFraction": 0.5, "isExhausted": False},
+        ],
+    }
+    import auth as auth_mod
+    with patch.object(auth_mod, "AntigravityAuthManager") as mgr_cls, \
+         patch("models.fetch_account_quota", return_value=snapshot):
+        mgr_cls.return_value.get_credentials.return_value = ("tok", "proj")
+        out = _capture(auth_mod._print_quota_status, reg, account)
+
+    assert "per-model only" in out
+    assert "2 models advertised, 1 exhausted" in out
+
+
+def _capture(fn, *args):
+    import io as _io
+    from contextlib import redirect_stdout
+
+    buf = _io.StringIO()
+    with redirect_stdout(buf):
+        fn(*args)
+    return buf.getvalue()

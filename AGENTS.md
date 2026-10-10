@@ -23,7 +23,8 @@ No pytest, no third-party test deps — by design (see CONTRIBUTING). Never add 
   `refresh_credential` (pool-side rotation). Public Hermes seams only.
 - `auth.py` — Google OAuth PKCE flow, token cache, account registry wiring.
 - `accounts.py` — multi-account registry, profile-scoped via `HERMES_HOME`.
-- `client.py` — chat-completions transport, quota failover, 403 surfacing.
+- `client.py` — chat-completions transport, proactive quota failover, 403 surfacing.
+- `quota.py` — pure quota core: parsers, formatting, selection rule; zero I/O.
 - `models.py` — catalog discovery, model-enum wire labels, core-version gate.
 - `translator.py` — pure Hermes ↔ Antigravity payload translation.
 - `tests/` — one module per source file plus provider registration.

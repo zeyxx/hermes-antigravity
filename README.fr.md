@@ -73,6 +73,7 @@ Ce plugin résout ce problème : il s'authentifie directement avec votre compte 
 - **Intégration native dans `hermes model` & `/model`** :
   - Sélection interactive du provider et du modèle avec configuration persistante dans `~/.hermes/config.yaml`.
   - Commandes auth natives : `hermes auth add antigravity`, `hermes auth list`, `hermes auth status antigravity`, `hermes auth remove antigravity`.
+  - **Quota en direct dans le statut** : `hermes auth status antigravity` ajoute le quota restant du compte (plan, groupes agrégés sur les abonnements payants, résumé par modèle en offre gratuite), lu directement depuis Antigravity.
   - Registre multi-comptes avec migration automatique.
 - **Résilience Réseau** : bascule automatique entre les endpoints candidats (`daily-cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.sandbox.googleapis.com`, `cloudcode-pa.googleapis.com`) plus relance avec backoff sur les HTTP 429 transitoires.
 

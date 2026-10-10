@@ -74,6 +74,7 @@ This plugin solves that problem: it authenticates directly with your Google acco
 - **Native Hermes Integration (`hermes model` & `/model`)**:
   - Interactive provider and model selection with persistent configuration in `~/.hermes/config.yaml`.
   - Native auth commands: `hermes auth add antigravity`, `hermes auth list`, `hermes auth status antigravity`, `hermes auth remove antigravity`.
+  - **Live quota in status**: `hermes auth status antigravity` appends the account's remaining quota (plan, aggregate groups on paid tiers, per-model summary on free tier) read directly from Antigravity.
   - Multi-account registry with legacy migration.
 - **Network Resilience**: Automatic failover across candidate endpoints (`daily-cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.sandbox.googleapis.com`, `cloudcode-pa.googleapis.com`) plus retry with backoff on transient HTTP 429.
 

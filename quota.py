@@ -312,6 +312,11 @@ def _pct(value: float | None) -> str:
     return "?" if percent is None else f"{percent}%"
 
 
+def percent_label(value: float | None) -> str:
+    """Public wrapper for the ``NN.N%``/``?`` label used by status output."""
+    return _pct(value)
+
+
 def format_quota_report(
     account_email: str | None,
     plan: str | None,
