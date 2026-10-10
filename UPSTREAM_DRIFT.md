@@ -14,12 +14,19 @@ upstream bump shows up as a red test rather than a silent degradation.
 
 ## How to use this
 
-1. `git fetch` pi-antigravity, note its version and commit date.
-2. Compare each row below against its upstream source.
-3. On any mismatch: port the change, update **both** columns and the `checked` date, and
-   open a PR. Never change a value here without changing the code that uses it.
-4. Rows marked **port only** are deliberately absent upstream. Do not "fix" them by
-   copying upstream — they exist because Hermes passes something Pi does not.
+Two references, checked separately:
+
+1. **Official CLI** (the fingerprint source): measure the live User-Agent of the
+   `agy` binary (see "How the official CLI was measured" below) and note the
+   version + build. This drives `CLI_VERSION` / `CLI_BUILD`.
+2. **pi-antigravity** (the protocol reference): `git fetch` it and compare each
+   protocol row below (scopes, redirect, model enums) against its TypeScript
+   source.
+3. On any mismatch: port the change, update the relevant columns and the
+   `checked` date, and open a PR. Never change a value here without changing the
+   code that uses it.
+4. Rows marked **port only** are deliberately absent upstream. Do not "fix" them
+   by copying upstream — they exist because Hermes passes something Pi does not.
 
 ### Finding *when* a value moved
 
@@ -42,30 +49,61 @@ merely renamed in the same diff.
 
 ## Status
 
-| Field | pi-antigravity | hermes-antigravity | Since | Checked |
-|---|---|---|---|---|
-| CLI version | `1.2.4` | `1.2.4` | 0.9.0 / #10 | 2026-10-05 |
-| CLI build (`cl=`) | `982146307` | `982146307` | 0.9.0 / #10 | 2026-10-05 |
-| User-Agent shape | `antigravity/cli/<v> (aidev_client; os_type=; arch=; cl=; auth_method=consumer)` | same, host-derived `os_type`/`arch` | **0.5.0** | 2026-10-05 |
-| OAuth scopes | 6 scopes | same 6, same order | 0.1.0 | 2026-10-05 |
-| OAuth callback | `http://localhost:51121/oauth-callback` | same | 0.1.0 | 2026-10-05 |
-| OAuth client id | public desktop client | byte-identical | 0.1.0 | 2026-10-05 |
-| Endpoint order | `daily-cloudcode-pa`, `…sandbox…`, `cloudcode-pa` | same | 0.1.0 | 2026-10-05 |
-| `requestId` | `agent/<conv>/<ms>/<traj>/<step>` | `<traj>-<reqIdx>-<step>` | **0.5.0** | 2026-10-05 |
-| `sessionId` | random int64, **per request** | stable `conversationId` | **0.5.0** | 2026-10-05 |
-| Label `cli-version` | absent from labels (version is in the User-Agent) | `antigravity/cli-version` | — | 2026-10-05 |
-| Label `last_step_index` | present | `antigravity/last-step-index` | **0.5.0** | 2026-10-05 |
-| Label `request_id` | `<traj>-<requestIndex>` | absent | **0.5.0** | 2026-10-05 |
-| Label `trajectory_id` | present | absent | **0.5.0** | 2026-10-05 |
-| Label `model_enum` | present (via `getModelEnum`) | `antigravity/model` | **0.5.0** | 2026-10-05 |
-| Label `used_claude` | `"true"`/`"false"` always | `antigravity/provider` only when Claude | **0.5.0** | 2026-10-05 |
-| Label `used_claude_conservative` | `"true"`/`"false"` always | absent | **0.5.0** | 2026-10-05 |
-| Label `used_non_gemini_model` | `"true"`/`"false"` always | absent | **0.5.0** | 2026-10-05 |
-| Label `last_execution_id` | present when `step > 1`, stable per step | absent | **0.9.0** | 2026-10-05 |
-| Trajectory seed | `session:<id>` authoritative | `session:<id>` when forwarded, else first message | 0.8.1 / #12 | 2026-10-05 |
-| Text sanitising | `sanitizeText`, unpaired surrogates only | same | 0.9.0 / #9 | 2026-10-05 |
-| `$ref` schema resolution | local pointers, cyclic-safe | **port only** — see below | — | 2026-10-05 |
-| Quota failover | `failoverToNextAccount` | `next_untried_account` | 0.8.0 / #13 | 2026-10-05 |
+Three references, not two. **pi-antigravity** is the reference
+*implementation* this port reimplements, but it is not the wire source of truth.
+**Official CLI** is the binary Google ships, measured by capturing its live
+User-Agent on the operator's host (see "How the official CLI was measured" below).
+The port must track the official CLI; pi-antigravity is kept because its enum
+table and envelope notes remain useful.
+
+| Field | Official CLI | pi-antigravity | hermes-antigravity | Since | Checked |
+|---|---|---|---|---|---|
+| CLI version | `1.3.3` | `1.2.4` | `1.3.3` | **measured** (2026-10-10) | 2026-10-10 |
+| CLI build (`cl=`) | `996823801` | `982146307` | `996823801` | **measured** (2026-10-10) | 2026-10-10 |
+| User-Agent shape | `antigravity/cli/<v> (aidev_client; os_type=; arch=; cl=; auth_method=consumer)` | `antigravity/cli/<v> (aidev_client; os_type=; arch=; cl=; auth_method=consumer)` | same, host-derived `os_type`/`arch` | **0.5.0** | 2026-10-10 |
+| OAuth scopes | 6 scopes | 6 scopes | same 6, same order | 0.1.0 | 2026-10-10 |
+| OAuth callback | `http://localhost:51121/oauth-callback` | `http://localhost:51121/oauth-callback` | same | 0.1.0 | 2026-10-10 |
+| OAuth client id | public desktop client | public desktop client | byte-identical | 0.1.0 | 2026-10-10 |
+| Endpoint order | `daily-cloudcode-pa`, `…sandbox…`, `cloudcode-pa` | `daily-cloudcode-pa`, `…sandbox…`, `cloudcode-pa` | same | 0.1.0 | 2026-10-10 |
+| `requestId` | `agent/<conv>/<ms>/<traj>/<step>` | `agent/<conv>/<ms>/<traj>/<step>` | `<traj>-<reqIdx>-<step>` | **0.5.0** | 2026-10-10 |
+| `sessionId` | random int64, **per request** | random int64, **per request** | stable `conversationId` | **0.5.0** | 2026-10-10 |
+| Label `cli-version` | absent from labels | absent from labels | `antigravity/cli-version` | — | 2026-10-10 |
+| Label `last_step_index` | present | present | `antigravity/last-step-index` | **0.5.0** | 2026-10-10 |
+| Label `request_id` | `<traj>-<requestIndex>` | `<traj>-<requestIndex>` | absent | **0.5.0** | 2026-10-10 |
+| Label `trajectory_id` | present | present | absent | **0.5.0** | 2026-10-10 |
+| Label `model_enum` | present | present | `antigravity/model` | **0.5.0** | 2026-10-10 |
+| Label `used_claude` | `"true"`/`"false"` always | `"true"`/`"false"` always | `antigravity/provider` only when Claude | **0.5.0** | 2026-10-10 |
+| Label `used_claude_conservative` | `"true"`/`"false"` always | `"true"`/`"false"` always | absent | **0.5.0** | 2026-10-10 |
+| Label `used_non_gemini_model` | `"true"`/`"false"` always | `"true"`/`"false"` always | absent | **0.5.0** | 2026-10-10 |
+| Label `last_execution_id` | present when `step > 1` | present when `step > 1` | absent | **0.9.0** | 2026-10-10 |
+| Trajectory seed | `session:<id>` authoritative | `session:<id>` authoritative | `session:<id>` when forwarded, else first message | 0.8.1 / #12 | 2026-10-10 |
+| Text sanitising | `sanitizeText` | `sanitizeText` | same | 0.9.0 / #9 | 2026-10-10 |
+| `$ref` schema resolution | local pointers | local pointers | **port only** — see below | — | 2026-10-10 |
+| Quota failover | `failoverToNextAccount` | `failoverToNextAccount` | `next_untried_account` | 0.8.0 / #13 | 2026-10-10 |
+
+## How the official CLI was measured
+
+The official CLI fingerprint was captured on 2026-10-10 on the operator's
+Linux host (x86-64) by running `agy models` through a local MITM proxy that
+terminates TLS with a self-signed CA injected via `SSL_CERT_FILE`. The proxy
+logs only the request line and headers (Authorization value withheld, kind
+recorded) and returns a stub response; nothing is forwarded to Google and no
+inference request is completed.
+
+Captured User-Agent (10 requests, all identical):
+
+```text
+antigravity/cli/1.3.3 (aidev_client; os_type=linux; arch=amd64; cl=996823801; auth_method=consumer)
+```
+
+Endpoints observed: `v1internal:loadCodeAssist`, `v1internal:listExperiments`
+on `daily-cloudcode-pa.googleapis.com`. No proprietary headers beyond the
+User-Agent were observed (`X-Goog-Api-Client` absent).
+
+The binary at `/home/user/.local/bin/agy` (214 MB, stripped Go ELF) also
+contains the string `996823801` repeated in build metadata
+(`googlefile:/google_src/files/996823801/`, `changelist 996823801`), and
+reports internal version `1.3.2.1` while `--version` prints `1.3.3`.
 
 ## Known divergences (read before porting)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare this port's wire constants against pi-antigravity, the reference implementation.
+"""Compare this port's wire constants against two references.
 
     python3 tools/check_upstream_drift.py            # report drift, exit 1 if any
     python3 tools/check_upstream_drift.py --refresh  # git fetch upstream first
@@ -7,15 +7,20 @@
 
 Why this exists
 ---------------
-This plugin is a port. pi-antigravity owns the wire protocol, and a port has no
-compiler to say when upstream moves. Three incidents in this repository were
-silent: a stale CLI fingerprint that the relay quietly downgraded, a missing core
-hook that 404'd every request, and an envelope realigned upstream in 0.5.0 that
-this port never saw. Nothing compared the two shapes, so nothing failed loudly.
+This plugin is a port. The wire protocol has two sources: the official
+Antigravity CLI (the binary Google ships) owns the CLI fingerprint, and
+pi-antigravity (a community reimplementation) is the reference for the
+protocol fields (scopes, redirect, model enums). A port has no compiler to say
+when either moves. Three incidents in this repository were silent: a stale CLI
+fingerprint that the relay quietly downgraded, a missing core hook that 404'd
+every request, and an envelope realigned upstream in 0.5.0 that this port never
+saw. Nothing compared the two shapes, so nothing failed loudly.
 
 What it checks
 --------------
-Values are read out of pi-antigravity's TypeScript source with narrow regexes and
+The CLI fingerprint (cli_version, cli_build) is compared to measured official
+CLI constants (OFFICIAL_CLI_VERSION / OFFICIAL_CLI_BUILD). The protocol fields
+are read out of pi-antigravity's TypeScript source with narrow regexes and
 compared against this repository's Python. It reports, and never edits:
 
   * the CLI fingerprint (version + build)
@@ -46,6 +51,13 @@ from typing import Any
 
 UPSTREAM_URL = "https://github.com/Rahularya01/pi-antigravity.git"
 UPSTREAM_REF = "main"
+
+# Official CLI fingerprint, measured 2026-10-10 by capturing the live
+# User-Agent via a local MITM proxy (see UPSTREAM_DRIFT.md). The port must
+# track the official CLI, not pi-antigravity, which is a reimplementation
+# that may lag behind the binary Google ships.
+OFFICIAL_CLI_VERSION = "1.3.3"
+OFFICIAL_CLI_BUILD = "996823801"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -88,6 +100,9 @@ def extract_upstream(up: Path) -> dict[str, Any]:
     fp = re.search(r'antigravity/cli/([0-9.]+)[^"]*?cl=(\d+)', client)
     if not fp:
         raise ExtractionError("CLI fingerprint not found in src/client/client.ts")
+    # Informational only: the port is gated on the official CLI (measured), not
+    # on pi-antigravity, which is a reimplementation that may lag behind the
+    # binary Google ships. Kept so its fingerprint is still visible in reports.
     data["cli_version"] = fp.group(1)
     data["cli_build"] = fp.group(2)
 
@@ -193,15 +208,36 @@ def read_port() -> dict[str, Any]:
 def compare(upstream: dict[str, Any], port: dict[str, Any]) -> dict[str, Any]:
     findings: dict[str, Any] = {"mismatch": [], "missing": [], "extra": []}
 
-    for field in ("cli_version", "cli_build", "redirect_uri"):
-        if upstream.get(field) != port.get(field):
-            findings["mismatch"].append(
-                {
-                    "field": field,
-                    "upstream": upstream.get(field),
-                    "port": port.get(field),
-                }
-            )
+    # The CLI fingerprint is compared to the official CLI (measured), not to
+    # pi-antigravity, which is a reimplementation that may lag behind the
+    # binary Google ships. The port must track the official CLI.
+    if port.get("cli_version") != OFFICIAL_CLI_VERSION:
+        findings["mismatch"].append(
+            {
+                "field": "cli_version",
+                "upstream": OFFICIAL_CLI_VERSION,
+                "port": port.get("cli_version"),
+            }
+        )
+    if port.get("cli_build") != OFFICIAL_CLI_BUILD:
+        findings["mismatch"].append(
+            {
+                "field": "cli_build",
+                "upstream": OFFICIAL_CLI_BUILD,
+                "port": port.get("cli_build"),
+            }
+        )
+
+    # The remaining fields are still compared to pi-antigravity, which is the
+    # reference implementation for the protocol (scopes, redirect, enums).
+    if upstream.get("redirect_uri") != port.get("redirect_uri"):
+        findings["mismatch"].append(
+            {
+                "field": "redirect_uri",
+                "upstream": upstream.get("redirect_uri"),
+                "port": port.get("redirect_uri"),
+            }
+        )
 
     if upstream.get("scopes") != port.get("scopes"):
         findings["mismatch"].append(
@@ -261,6 +297,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps({
             "upstream_commit": commit,
+            "official_cli_version": OFFICIAL_CLI_VERSION,
+            "official_cli_build": OFFICIAL_CLI_BUILD,
             "checked": ["cli_version", "cli_build", "redirect_uri", "scopes", "model_enums"],
             "port_only": sorted(PORT_ONLY),
             "findings": findings,
@@ -269,7 +307,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"upstream pi-antigravity @ {commit}")
         print(f"port      {REPO_ROOT.name}")
-        for field in ("cli_version", "cli_build", "redirect_uri", "scopes"):
+        print(f"  (fingerprint gated on official CLI "
+              f"{OFFICIAL_CLI_VERSION}/{OFFICIAL_CLI_BUILD})")
+        # Fingerprint compared to official CLI (measured), not pi-antigravity.
+        for field, official in (("cli_version", OFFICIAL_CLI_VERSION), ("cli_build", OFFICIAL_CLI_BUILD)):
+            pt = port.get(field)
+            mark = "OK  " if pt == official else "DIFF"
+            print(f"  {mark} {field}: {pt} (official {official})")
+        for field in ("redirect_uri", "scopes"):
             up, pt = upstream.get(field), port.get(field)
             mark = "OK  " if up == pt else "DIFF"
             shown = up if isinstance(up, str) else f"{len(up or [])} scopes"
