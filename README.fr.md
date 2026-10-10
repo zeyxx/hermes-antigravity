@@ -276,9 +276,21 @@ Ni pytest, ni dépendances : le lanceur n'utilise que la bibliothèque standard
 
 ---
 
-## ⚠️ Avertissement
+## ⚠️ Avertissement — à lire avant de vous connecter
 
-Ce plugin utilise les endpoints Google Cloud Code Assist (`cloudcode-pa.googleapis.com`) en dehors du client officiel Antigravity CLI. Il ne s'agit **pas** d'une intégration officiellement supportée par Google. L'utilisation de ces endpoints via un client tiers peut ne pas être conforme aux Conditions d'Utilisation de Google et pourrait entraîner des restrictions ou la suspension de votre compte Google. Ces endpoints peuvent également être modifiés ou bloqués par Google à tout moment et sans préavis.
+Ce plugin utilise les endpoints Google Cloud Code Assist (`cloudcode-pa.googleapis.com`) via **l'OAuth Antigravity**, en dehors du client officiel Antigravity CLI. **Cela constitue une violation des Conditions d'Utilisation d'Antigravity de Google.** Les conditions sont explicites :
+
+> « Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for **suspension or termination of your Antigravity and/or Gemini CLI accounts**. »
+
+Ce n'est **pas théorique**. Google a mené des vagues d'application actives désactivant les comptes qui accèdent à Antigravity via des clients OAuth tiers. Les bans coupent aussi l'accès à **Gemini CLI et Gemini Code Assist** sur le même compte, et une seconde infraction entraîne un ban **permanent**. Un compte Google personnel peut porter des services sans rapport auxquels vous tenez.
+
+**L'alternative conforme :** utilisez une **clé API Gemini AI Studio / Google AI Studio** (facturation à l'usage) avec un provider Gemini, au lieu de l'OAuth Antigravity. Les conditions n'interdisent que l'usage détourné de l'OAuth d'*abonnement* ; une clé API facturée au token est le chemin supporté.
+
+`hermes auth add antigravity` affiche cet avertissement avant de démarrer le flux OAuth. Si vous poursuivez, vous acceptez le risque pour votre compte.
+
+### Transport TLS (surface de détection)
+
+Le client officiel `agy` est un binaire **Go** ; ce plugin parle TLS via la stdlib Python `ssl`/OpenSSL. Leur ClientHello TLS (donc leur empreinte JA3) diffère. Le plugin **réduit** l'écart là où la stdlib le permet — il annonce `h2,http/1.1` et restreint la liste de ciphers vers celle de Go — mais il **ne peut pas** reproduire Go exactement : l'API SSL publique de Python n'expose ni la liste ordonnée des groupes supportés ni l'ordre des extensions, qui constituent le cœur du hash JA3. Voir `tls_profile.py` et l'issue #35 pour la mesure. Cela réduit la différence observable ; cela **ne rend pas** l'intégration conforme aux ToS.
 
 **Utilisation à vos propres risques.** Les auteurs de ce plugin ne sont pas responsables des conséquences liées à son utilisation.
 

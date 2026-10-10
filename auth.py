@@ -30,6 +30,22 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Shown before the OAuth flow starts, at the moment of risk. Google's Antigravity
+# Additional Terms state that using third-party software to access the Service
+# with Antigravity OAuth is a breach "and may be grounds for suspension or
+# termination of your Antigravity and/or Gemini CLI accounts." This is not
+# theoretical: Google has run enforcement waves disabling such accounts, with
+# permanent bans on a second flag. The user must see this before signing in.
+_TOS_WARNING = (
+    "WARNING: Google's Terms of Service prohibit accessing Antigravity with "
+    "third-party software using Antigravity OAuth.\n"
+    "         Violations may lead to suspension or termination of your "
+    "Antigravity and/or Gemini CLI accounts.\n"
+    "         For a ToS-compliant integration, use a Gemini AI Studio / "
+    "Enterprise API key instead of Antigravity OAuth.\n"
+    "         Continue at your own risk."
+)
+
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 # The loopback callback listener. Fixed port and host because REDIRECT_URI is
@@ -648,6 +664,7 @@ def antigravity_auth_handler(action: str, args: Any) -> bool:
 def _antigravity_auth_add(args: Any) -> bool:
     from agent.credential_pool import load_pool
 
+    print(_TOS_WARNING)
     pool = load_pool("antigravity")
     creds = _antigravity_oauth_login(args)
     token = _antigravity_token_extractor(creds)

@@ -42,6 +42,7 @@ MODULES = (
     "tests.test_auth",
     "tests.test_client",
     "tests.test_provider_registration",
+    "tests.test_tls_profile",
 )
 
 

@@ -224,3 +224,59 @@ def test_auth_handler_add_writes_one_pooled_row(monkeypatch=None):
     assert calls.get("saved") is True
     assert "titouan@example.com" in calls["add"]["label"], (
         "the pool row must be labelled with the account that signed in")
+
+
+def test_auth_add_warns_about_google_tos_before_login(monkeypatch=None):
+    """``hermes auth add antigravity`` must warn about the ToS before OAuth.
+
+    Google's Antigravity Terms prohibit third-party OAuth access and carry a
+    suspension/termination risk; enforcement is active. The warning is a
+    non-negotiable part of the add path, shown before the login flow starts.
+    """
+    import io
+    import sys
+    import tempfile
+    from contextlib import redirect_stdout
+    from pathlib import Path
+    from unittest.mock import patch
+
+    import auth as auth_mod
+
+    fake_login = {
+        "email": "titouan@example.com",
+        "access_token": "tok", "refresh_token": "rt",
+        "expires_at": 9e9, "project_id": "proj", "scope": "",
+    }
+
+    sandbox = Path(tempfile.mkdtemp())
+    monkeypatch = __import__("os").environ
+    monkeypatch["HERMES_HOME"] = str(sandbox)
+
+    class _Pool:
+        def entries(self):
+            return []
+        def add(self, *a, **k):
+            return None
+        def save(self):
+            return None
+
+    fake = type(sys)("agent.credential_pool")
+    fake.load_pool = lambda *a, **k: _Pool()
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    try:
+        buf = io.StringIO()
+        with patch.object(auth_mod, "_antigravity_oauth_login", return_value=fake_login), \
+             redirect_stdout(buf):
+            auth_mod.antigravity_auth_handler("add", type("A", (), {"label": None})())
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
+
+    out = buf.getvalue()
+    assert "Terms of Service" in out, "the add path must warn about the ToS"
+    assert "suspension or termination" in out.lower(), (
+        "the warning must state the concrete account risk")
+    assert "API key" in out, "the warning must point at the compliant alternative"

@@ -259,9 +259,21 @@ No pytest, no dependencies: the runner is standard library only (see
 
 ---
 
-## ⚠️ Disclaimer
+## ⚠️ Disclaimer — read this before signing in
 
-This plugin uses Google's Cloud Code Assist endpoints (`cloudcode-pa.googleapis.com`) outside of the official Antigravity CLI. This is **not** an officially supported integration by Google. Using these endpoints through a third-party client may not comply with Google's Terms of Service and could carry a risk of account restrictions or suspension. The endpoints may also change or be blocked by Google at any time without notice.
+This plugin uses Google's Cloud Code Assist endpoints (`cloudcode-pa.googleapis.com`) through **Antigravity OAuth**, outside the official Antigravity CLI. **This is a breach of Google's Antigravity Terms of Service.** The terms are explicit:
+
+> "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for **suspension or termination of your Antigravity and/or Gemini CLI accounts**."
+
+This is **not theoretical**. Google has run active enforcement waves disabling accounts that access Antigravity through third-party OAuth clients. Bans have also cut off **Gemini CLI and Gemini Code Assist** access on the same account, and a second flag is a **permanent** ban. A personal Google account can carry unrelated services you care about.
+
+**The compliant alternative:** use a **Gemini AI Studio / Google AI Studio API key** (pay-per-token) with a Gemini provider, instead of Antigravity OAuth. The terms only prohibit piggybacking on the *subscription* OAuth; a metered API key is the supported path.
+
+`hermes auth add antigravity` prints this warning before it starts the OAuth flow. If you proceed, you accept the account risk.
+
+### TLS transport (detection surface)
+
+The official `agy` client is a **Go** binary; this plugin speaks TLS through Python's stdlib `ssl`/OpenSSL. Their TLS ClientHello (and thus their JA3 fingerprint) differs. The plugin **narrows** the gap where stdlib allows — it advertises `h2,http/1.1` and restricts the cipher list toward Go's — but it **cannot** match Go exactly: Python's public SSL API exposes neither the ordered supported-groups list nor the extension order, which are the core of the JA3 hash. See `tls_profile.py` and issue #35 for the measurement. This reduces the observable difference; it does **not** make the integration ToS-compliant.
 
 **Use at your own discretion and risk.** The authors of this plugin are not responsible for any consequences arising from its use.
 
