@@ -752,7 +752,6 @@ def test_failover_refreshes_the_new_accounts_refresh_token():
     """
     import tempfile
     from pathlib import Path
-    from unittest.mock import MagicMock
 
     sandbox = Path(tempfile.mkdtemp())
     from accounts import AntigravityAccountRegistry
