@@ -108,6 +108,36 @@ contains the string `996823801` repeated in build metadata
 (`googlefile:/google_src/files/996823801/`, `changelist 996823801`), and
 reports internal version `1.3.2.1` while `--version` prints `1.3.3`.
 
+## TLS transport divergence (issue #35)
+
+The wire constants above are only half the identity: the transport differs too.
+`agy` is a Go binary; this port speaks TLS through Python's stdlib
+`ssl`/OpenSSL. Their ClientHello (hence JA3) differs, and a JA3 is a cheap
+server-side signal to correlate a non-official client.
+
+Same-host capture, 2026-10-10, Linux x86-64, Python 3.14.7 / OpenSSL 3.5.8,
+both dialing `daily-cloudcode-pa.googleapis.com`:
+
+| Field | agy (Go) | urllib default | urllib + `tls_profile` |
+|---|---|---|---|
+| Cipher count | 13 | 17 | 12 |
+| ALPN | `h2,http/1.1` | `http/1.1` | `h2,http/1.1` |
+| Supported groups | `4588,4587,4589,29,23,24,25` | `4588,29,23,30,24,25,256,257` | same as default |
+| JA3 MD5 | `03117a8ed39ef02427ebbc39f121275c` | `a1ebe7f90a577e9399eaa60be3c67721` | `e1c38f8d660e92ed4c7d7dfe75c91a1c` |
+
+`tls_profile.py` aligns ALPN (`h2,http/1.1`) and narrows the cipher list toward
+Go's, which is what stdlib permits. It **cannot** reach parity: Python's public
+SSL API exposes neither the ordered supported-groups list (the Go list carries
+the PQC hybrids `4587`/`4589`; Python's carries P-256/P-384 instead) nor the
+extension order. Those two fields dominate the JA3, so an exact Go fingerprint
+is not achievable in stdlib. The profile reduces the observable difference; it
+does not erase it, and it does not change the ToS position (see README
+disclaimer — the OAuth use itself is the violation).
+
+`tests/test_tls_profile.py` pins the tuned profile with a live loopback capture,
+so a Python/OpenSSL upgrade that silently changes the offered handshake fails
+loudly instead of growing a new fingerprint unnoticed.
+
 ## Known divergences (read before porting)
 
 **The envelope was realigned upstream in 0.5.0 (`ac1a393`) and this port never caught

@@ -19,8 +19,16 @@ try:
     from . import quota as _quota
 except ImportError:
     import quota as _quota
+try:
+    from .tls_profile import install_tuned_opener
+except ImportError:
+    from tls_profile import install_tuned_opener
 
 logger = logging.getLogger(__name__)
+
+# Tune the HTTPS ClientHello toward the official Go client (see tls_profile).
+# Best-effort: never raises, never blocks a request if the build lacks a knob.
+install_tuned_opener()
 
 
 CLI_VERSION = "1.3.3"
