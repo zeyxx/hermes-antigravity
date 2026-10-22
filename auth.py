@@ -561,6 +561,19 @@ def antigravity_refresh_credential(entry: Any) -> dict[str, Any] | None:
     }
 
 
+# Refresh a row this long before its recorded expiry (matches the core's expiry skew).
+_LEASE_EXPIRY_SKEW_MS = 120_000
+
+
+def _row_expiring(row: Any) -> bool:
+    """True when a pooled row's access token is expired or about to expire."""
+    expires_ms = getattr(row, "expires_at_ms", None)
+    try:
+        return bool(expires_ms) and float(expires_ms) <= time.time() * 1000 + _LEASE_EXPIRY_SKEW_MS
+    except (TypeError, ValueError):
+        return False
+
+
 def resolve_pool_credential(
     prefer_token: str | None = None,
     model: str | None = None,
@@ -589,6 +602,15 @@ def resolve_pool_credential(
             for row in pool.entries():
                 token = (getattr(row, "access_token", "") or "").strip()
                 if token and token == wanted:
+                    # The bearer may have expired since the pool last refreshed it. Serving it
+                    # unchanged makes every endpoint answer 401, which discovery reports as an
+                    # empty model list. reclaim() refreshes an expiring row the way select()
+                    # does; if it cannot (cooldown), fall through to the rotation-aware select.
+                    if _row_expiring(row) and hasattr(pool, "reclaim"):
+                        refreshed = pool.reclaim(getattr(row, "id", ""))
+                        if refreshed is not None:
+                            return _pool_row_credential(refreshed)
+                        break
                     return _pool_row_credential(row)
         if pool.has_available(model=model):
             row = pool.select(model=model)

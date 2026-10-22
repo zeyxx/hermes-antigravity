@@ -486,3 +486,27 @@ def test_fetch_available_models_skips_leaving_soon_but_keeps_notice():
     finally:
         models_mod.MODEL_ENUM_STORE = original_store
         _reset_model_enum_cache()
+
+
+def test_fetch_available_models_warns_when_bearer_is_rejected():
+    """401/403 must be visible at warning level; a silent [] reads as 'no models'."""
+    import logging
+    import urllib.error
+    import models as models_mod
+
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Capture(level=logging.WARNING)
+    models_mod.logger.addHandler(handler)
+    err = urllib.error.HTTPError("https://example.invalid", 401, "Unauthorized", {}, None)
+    try:
+        with patch("models.DEFAULT_OPENER.open", side_effect=err):
+            assert fetch_available_models("dead-token", "proj", endpoints=["https://example.invalid"]) == []
+    finally:
+        models_mod.logger.removeHandler(handler)
+    warned = [r for r in records if r.levelno == logging.WARNING and "401" in r.getMessage()]
+    assert warned, "a rejected bearer must produce a warning naming the status code"

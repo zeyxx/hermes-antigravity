@@ -467,7 +467,13 @@ def fetch_available_models(
                 if discovered:
                     break
         except Exception as exc:
-            logger.debug("fetchAvailableModels failed on %s: %s", endpoint, exc)
+            # A 401/403 means the bearer was rejected. Without a log line that is
+            # indistinguishable from "no models", so surface it at warning level.
+            auth_rejected = isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403)
+            logger.log(
+                logging.WARNING if auth_rejected else logging.DEBUG,
+                "fetchAvailableModels failed on %s: %s", endpoint, exc,
+            )
             continue
 
     if discovered:

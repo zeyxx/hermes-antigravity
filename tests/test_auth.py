@@ -452,3 +452,70 @@ def test_create_client_serves_the_pool_row_first():
             sys.modules.pop("agent.credential_pool", None)
     assert client.auth.credentials["access_token"] == "ya29.inference-token"
     assert client.auth.credentials["project_id"] == "proj-inference"
+
+
+class _ReclaimPool:
+    """Pool stand-in exposing the rows, select(), and reclaim() the resolver uses."""
+
+    def __init__(self, rows, refreshed=None):
+        self._rows = list(rows)
+        self._refreshed = refreshed
+        self.reclaimed = []
+
+    def entries(self):
+        return list(self._rows)
+
+    def has_available(self, model=None):
+        del model
+        return bool(self._rows)
+
+    def select(self, model=None):
+        del model
+        return self._rows[0] if self._rows else None
+
+    def reclaim(self, credential_id):
+        self.reclaimed.append(credential_id)
+        return self._refreshed
+
+
+def _resolve_with_pool(pool, prefer_token):
+    import sys
+
+    import auth as auth_mod
+
+    fake = type(sys)("agent.credential_pool")
+    fake.load_pool = lambda *a, **k: pool
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    try:
+        return auth_mod.resolve_pool_credential(prefer_token=prefer_token)
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
+
+
+def test_resolve_pool_credential_refreshes_expired_leased_row():
+    """A leased bearer past its expiry must be refreshed, not served as-is (401 otherwise)."""
+    stale = _pool_row("ya29.stale", project="proj-x")
+    stale.expires_at_ms = 1000  # long expired
+    fresh = _pool_row("ya29.fresh", project="proj-x")
+    pool = _ReclaimPool([stale], refreshed=fresh)
+
+    leased = _resolve_with_pool(pool, prefer_token="ya29.stale")
+
+    assert pool.reclaimed == ["pool01"]
+    assert leased is not None
+    assert leased["access_token"] == "ya29.fresh"
+
+
+def test_resolve_pool_credential_keeps_a_live_leased_row_without_refresh():
+    """A bearer that is still valid is served unchanged; no refresh round trip."""
+    live = _pool_row("ya29.live", project="proj-x")
+    pool = _ReclaimPool([live], refreshed=None)
+
+    leased = _resolve_with_pool(pool, prefer_token="ya29.live")
+
+    assert pool.reclaimed == []
+    assert leased["access_token"] == "ya29.live"
