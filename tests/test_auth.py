@@ -519,3 +519,61 @@ def test_resolve_pool_credential_keeps_a_live_leased_row_without_refresh():
 
     assert pool.reclaimed == []
     assert leased["access_token"] == "ya29.live"
+
+
+def test_resolve_pool_credential_skips_client_id_config_row():
+    """A leased CLIENT_ID is config, never a bearer: serve the OAuth row."""
+    import sys
+
+    import auth as auth_mod
+
+    rows = [
+        _pool_row("ya29.oauth-token", project="proj-oauth"),
+        _pool_row(
+            "12345.apps.googleusercontent.com",
+            project="proj-oauth",
+            label="ANTIGRAVITY_CLIENT_ID",
+        ),
+    ]
+    fake = _fake_pool_module(rows)
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    try:
+        leased = auth_mod.resolve_pool_credential(
+            prefer_token="12345.apps.googleusercontent.com")
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
+    assert leased is not None
+    assert leased["access_token"] == "ya29.oauth-token"
+
+
+def test_pool_row_credential_refuses_config_labels():
+    """Config rows must normalize to None so callers fall back, never 401."""
+    import auth as auth_mod
+
+    for label in ("ANTIGRAVITY_CLIENT_ID", "ANTIGRAVITY_CLIENT_SECRET"):
+        row = _pool_row("whatever-stored", label=label)
+        assert auth_mod._pool_row_credential(row) is None
+
+
+def test_resolve_pool_credential_returns_none_when_only_config_rows():
+    """Only config rows means no bearer: None so callers use the registry."""
+    import sys
+
+    import auth as auth_mod
+
+    rows = [_pool_row("12345.apps.googleusercontent.com",
+                      label="ANTIGRAVITY_CLIENT_ID")]
+    fake = _fake_pool_module(rows)
+    saved = sys.modules.get("agent.credential_pool")
+    sys.modules["agent.credential_pool"] = fake
+    try:
+        assert auth_mod.resolve_pool_credential() is None
+    finally:
+        if saved is not None:
+            sys.modules["agent.credential_pool"] = saved
+        else:
+            sys.modules.pop("agent.credential_pool", None)
