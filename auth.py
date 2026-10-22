@@ -574,6 +574,14 @@ def _row_expiring(row: Any) -> bool:
         return False
 
 
+# Pool labels that are OAuth client config, never bearers. The core leases
+# whatever is stored under env_vars as api_key; serving CLIENT_ID/SECRET as
+# the bearer makes every endpoint answer 401 and the picker prompt for a
+# CLIENT_ID. Skipped here so select() (or the registry fallback) serves the
+# OAuth row instead.
+_NON_BEARER_LABELS = frozenset({"ANTIGRAVITY_CLIENT_ID", "ANTIGRAVITY_CLIENT_SECRET"})
+
+
 def resolve_pool_credential(
     prefer_token: str | None = None,
     model: str | None = None,
@@ -600,6 +608,8 @@ def resolve_pool_credential(
         if prefer_token:
             wanted = prefer_token.strip()
             for row in pool.entries():
+                if getattr(row, "label", "") in _NON_BEARER_LABELS:
+                    continue
                 token = (getattr(row, "access_token", "") or "").strip()
                 if token and token == wanted:
                     # The bearer may have expired since the pool last refreshed it. Serving it
@@ -623,6 +633,8 @@ def resolve_pool_credential(
 
 def _pool_row_credential(row: Any) -> dict[str, Any] | None:
     """Normalize one pooled row to a static credential dict for the manager."""
+    if getattr(row, "label", "") in _NON_BEARER_LABELS:
+        return None
     token = (getattr(row, "access_token", "") or "").strip() or (
         getattr(row, "runtime_api_key", "") or ""
     ).strip()
