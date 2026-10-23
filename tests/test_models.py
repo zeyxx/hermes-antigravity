@@ -488,6 +488,44 @@ def test_fetch_available_models_skips_leaving_soon_but_keeps_notice():
         _reset_model_enum_cache()
 
 
+def test_fetch_available_models_skips_unavailable_but_keeps_notice():
+    """Tier/account-gated models carry tagTitle 'Unavailable' (e.g. argon on
+    a free student plan). They must not be advertised as a live catalog, while
+    informational 'Notice' tags stay listed. Enums still registered for both."""
+    import tempfile
+    import json as _json
+    import models as models_mod
+
+    payload = {"models": {
+        "gemini-4-argon-disabled": {"model": "MODEL_ARGON",
+                                    "tagTitle": "Unavailable",
+                                    "tagDescription": "Requires paid AI Pro."},
+        "claude-sonnet-4-6": {"model": "MODEL_SONNET",
+                              "tagTitle": "Notice",
+                              "tagDescription": "Plan change notice."},
+        "gemini-3.8-flash-low": {"model": "MODEL_CUR"},
+    }}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return _json.dumps(payload).encode("utf-8")
+
+    _reset_model_enum_cache()
+    original_store = models_mod.MODEL_ENUM_STORE
+    models_mod.MODEL_ENUM_STORE = Path(tempfile.mkdtemp()) / "enums.json"
+    try:
+        with patch("models.DEFAULT_OPENER.open", return_value=_Resp()):
+            discovered = models_mod.fetch_available_models("tok", "proj")
+        assert "gemini-4-argon-disabled" not in discovered
+        assert "claude-sonnet-4-6" in discovered
+        assert "gemini-3.8-flash-low" in discovered
+        assert models_mod.get_model_enum("gemini-4-argon-disabled") == "MODEL_ARGON"
+    finally:
+        models_mod.MODEL_ENUM_STORE = original_store
+        _reset_model_enum_cache()
+
+
 def test_fetch_available_models_warns_when_bearer_is_rejected():
     """401/403 must be visible at warning level; a silent [] reads as 'no models'."""
     import logging

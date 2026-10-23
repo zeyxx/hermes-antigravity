@@ -452,15 +452,17 @@ def fetch_available_models(
                     enum = info.get("model")
                     if isinstance(enum, str) and enum:
                         register_model_enum(m_id, enum)
-                    # The relay marks models Google is retiring with
-                    # tagTitle 'Leaving Soon' (e.g. 'Start using Gemini 3.8
-                    # Flash...' in tagDescription). A mere tag like 'Notice' is
-                    # informational, not a retirement — keep those. Match on the
-                    # wire signal, never on a hardcoded id list: the retired set
-                    # changes and the relay is authoritative.
                     tag = info.get("tagTitle")
-                    if isinstance(tag, str) and "leaving" in tag.lower():
-                        logger.debug("fetchAvailableModels skips retiring model %s (%s)", m_id, tag)
+                    # The relay marks retiring models with tagTitle 'Leaving Soon'
+                    # and account/tier-unavailable models with 'Unavailable'
+                    # (e.g. 'gemini-4-argon-disabled', gated behind paid AI Pro).
+                    # Both must not be advertised as a live catalog. Informational
+                    # tags like 'Notice' stay listed. Match on the wire signal,
+                    # never on a hardcoded id list.
+                    if isinstance(tag, str) and (
+                        "leaving" in tag.lower() or "unavailable" in tag.lower()
+                    ):
+                        logger.debug("fetchAvailableModels skips unavailable/retiring model %s (%s)", m_id, tag)
                         continue
                     if any(prefix in m_id for prefix in ("gemini-", "claude-", "gpt-oss-")):
                         discovered.add(m_id)
