@@ -43,6 +43,12 @@ No pytest, no third-party test deps — by design (see CONTRIBUTING). Never add 
 
 - `main` is protected: strict `tests` + `drift` checks, linear history, no force
   pushes, no direct pushes. Everything lands via PR with green CI.
+- Merge authority: the operator's explicit go is the merge decision; the agent
+  executes it. Fork PRs need CI approval first
+  (`gh api -X POST repos/<owner>/<repo>/actions/runs/<id>/approve`), then
+  1 owner review, then squash-merge when CLEAN. Own PRs cannot be
+  self-approved (GitHub rule) — they merge once CI is green. Squash only:
+  linear history forbids merge commits.
 - Conventional commits, English: `fix(auth): …`, `feat(models): …`, `ci: …`, `docs: …`.
 - Version bumps are maintainer `chore(release)` PRs (`plugin.yaml` + `pyproject.toml`
   in lockstep). Pushing an annotated tag `vX.Y.Z` triggers `.github/workflows/release.yml`,
