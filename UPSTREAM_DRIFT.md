@@ -91,6 +91,8 @@ column and the checker keeps comparing against it.
 | Per-model quota (`quotaInfo`) | `remainingFraction`, `resetTime` | `remainingFraction`, `resetTime` | parsed in `quota.py`, measured via `fetch_account_quota` | 0.10.0 | 2026-10-10 |
 | Aggregate quota (`retrieveUserQuotaSummary`) | groups/buckets, 403 on free-tier | groups/buckets, 403 on free-tier | `quota.parse_quota_groups`, best-effort | 0.10.0 | 2026-10-10 |
 | Plan tier (`paidTier` over `currentTier`) | `planLabel` | `planLabel` | `quota.plan_label` | 0.10.0 | 2026-10-10 |
+| Model retirement tag (`tagTitle`) | `Leaving Soon` | `Leaving Soon` | filtered in `fetch_available_models` | 1.5.0 | 2026-10-10 |
+| Account/tier-unavailable tag (`tagTitle`) | `Unavailable` (e.g. `gemini-4-argon-disabled`, gated behind paid AI Pro) | not observed | filtered in `fetch_available_models` (added 2026-10-23) | 1.5.0 | 2026-10-23 |
 
 ## How the official CLI was measured
 
