@@ -82,6 +82,8 @@ This plugin solves that problem: it authenticates directly with your Google acco
 
 ## 📦 Installation & Discovery
 
+> **Catalog status:** this plugin is **not** listed in the upstream Nous Research Hermes Agent provider catalog (declined 2026-10-24: it presents Google's official Antigravity client fingerprint, which the catalog does not accept). It is distributed from this repository only. Install instructions below.
+
 ### Requirements
 
 **Hermes Agent v0.20.0 or newer.** This plugin delivers inference through

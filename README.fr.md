@@ -81,6 +81,8 @@ Ce plugin résout ce problème : il s'authentifie directement avec votre compte 
 
 ## 📦 Installation & Découverte
 
+> **Statut catalogue :** ce plugin n'est **pas** listé dans le catalogue officiel des providers Hermes Agent de Nous Research (refusé le 2026-10-24 : il présente l'empreinte du client officiel Antigravity de Google, que le catalogue n'accepte pas). Il est distribué uniquement depuis ce dépôt. Instructions d'installation ci-dessous.
+
 ### Prérequis
 
 **Hermes Agent v0.20.0 ou plus récent.** Ce plugin fournit l'inférence via
