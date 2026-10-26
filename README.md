@@ -96,6 +96,13 @@ If requests 404 on a provider that looks correctly configured, check your core v
 before anything else. The plugin logs an explicit error at load time when the hook is
 missing.
 
+**Option A — pip (recommended):**
+```bash
+pip install hermes-antigravity
+```
+Hermes Agent discovers the plugin automatically via its entry point.
+
+**Option B — git clone (development / pinned revision):**
 Clone this repository into your Hermes model providers plugin directory:
 
 **Linux & macOS:**

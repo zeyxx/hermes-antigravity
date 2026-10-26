@@ -24,9 +24,16 @@ classifiers = [
 Homepage = "https://github.com/zeyxx/hermes-antigravity"
 Repository = "https://github.com/zeyxx/hermes-antigravity"
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["tests*"]
+[tool.setuptools]
+package-dir = { "hermes_antigravity" = "." }
+packages = ["hermes_antigravity"]
+py-modules = []
+
+[tool.setuptools.package-data]
+hermes_antigravity = ["plugin.yaml", "transport_contract.json", "tools/*"]
+
+[project.entry-points."hermes_agent.plugins"]
+antigravity = "hermes_antigravity" 
 
 [tool.ruff]
 line-length = 100

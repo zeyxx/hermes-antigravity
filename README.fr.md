@@ -110,6 +110,13 @@ absents de son propre amont, ou quand elle est sur une révision inattendue — 
 n'existe que sur cette machine devient un échec bruyant plutôt qu'une perte silencieuse.
 `--force` passe outre, et le message indique ce que vous perdriez.
 
+**Option A — pip (recommandé) :**
+```bash
+pip install hermes-antigravity
+```
+Hermes Agent découvre le plugin automatiquement via son entry point.
+
+**Option B — git clone (développement / révision épinglée) :**
 Clonez simplement le dépôt dans votre répertoire de plugins Hermes :
 
 **Linux & macOS :**
