@@ -64,7 +64,7 @@ jobs:
           python3 tools/run_tests.py --min-tests "$count"
 
       - name: Upstream drift check
-        run: python3 tools/check_upstream_drift.py --refresh
+        run: python3 tools/check_upstream_drift.py
 
       - name: Publish GitHub release
         env:
@@ -78,5 +78,5 @@ jobs:
             --notes "Pinned commit: $sha
           Proof (verified by this workflow on the tagged tree before publishing):
           - test suite: $count collected, all passing (tools/run_tests.py)
-          - upstream drift: wire constants match pi-antigravity (tools/check_upstream_drift.py)
+          - upstream drift: official CLI fingerprint (tools/check_upstream_drift.py) (tools/check_upstream_drift.py)
           - version files: plugin.yaml and pyproject.toml both carry ${tag#v}"

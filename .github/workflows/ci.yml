@@ -83,7 +83,7 @@ jobs:
           python-version: "3.12"
 
       - name: Compare wire constants against pi-antigravity
-        run: python3 tools/check_upstream_drift.py --refresh
+        run: python3 tools/check_upstream_drift.py
 
       - name: Drift report (machine-readable)
         if: always()
