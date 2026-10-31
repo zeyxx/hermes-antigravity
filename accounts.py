@@ -159,6 +159,7 @@ class AntigravityAccountRegistry:
         )
         self._data["accounts"][account_id] = account.to_dict()
         self._data["active_account"] = account_id
+        self._data["_pool_managed"] = True
         self._save()
         return account
 
