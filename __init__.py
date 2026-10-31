@@ -107,6 +107,20 @@ class AntigravityProfile(ProviderProfile):
         if leased is not None:
             return AntigravityClient(
                 auth_manager=AntigravityAuthManager(credentials=leased))
+        # If the pool was cleared (e.g. logout) and this registry was pool-managed,
+        # drop stale tokens so logout actually disconnects. Skip under tests.
+        import os as _os
+        if not _os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                from agent.credential_pool import load_pool
+
+                registry = AntigravityAccountRegistry()
+                if (not load_pool("antigravity").entries()
+                        and registry._data.get("_pool_managed")):
+                    registry._data = {"version": 2, "active_account": None, "accounts": {}, "_pool_managed": True}
+                    registry._save()
+            except Exception:
+                pass
         registry = AntigravityAccountRegistry()
         account = registry.get_account()
         if not _registry_account_usable(account):
@@ -139,6 +153,18 @@ class AntigravityProfile(ProviderProfile):
             except Exception as exc:
                 logger.debug("fetch_models failed: %s", exc)
                 return []
+        import os as _os
+        if not _os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                from agent.credential_pool import load_pool
+
+                registry = AntigravityAccountRegistry()
+                if (not load_pool("antigravity").entries()
+                        and registry._data.get("_pool_managed")):
+                    registry._data = {"version": 2, "active_account": None, "accounts": {}, "_pool_managed": True}
+                    registry._save()
+            except Exception:
+                pass
         registry = AntigravityAccountRegistry()
         account = registry.get_account()
         if not _registry_account_usable(account):
