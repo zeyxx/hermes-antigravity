@@ -777,7 +777,7 @@ def _antigravity_auth_status(args: Any) -> bool:
     if account is not None:
         print(f"  account: {account.email}")
 
-    _print_quota_status(registry, account)
+    _print_all_account_quotas(registry)
     return True
 
 
@@ -807,6 +807,45 @@ def _pool_entry_expired(entry: Any) -> bool:
         return parsed.timestamp() <= _time.time()
     except Exception:
         return False
+
+
+def _print_all_account_quotas(registry: "AntigravityAccountRegistry") -> None:
+    """Print quota for every registered account (best-effort, read-only)."""
+    accounts = registry.list_accounts()
+    if not accounts:
+        return
+    for account in accounts:
+        mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
+        try:
+            token, project_id = mgr.get_credentials()
+        except Exception as exc:
+            print(f"  {account.email}: credentials unavailable ({exc})")
+            continue
+        try:
+            from .models import fetch_account_quota
+            from . import quota as _quota_mod
+        except ImportError:
+            from models import fetch_account_quota
+            import quota as _quota_mod
+        try:
+            snapshot = fetch_account_quota(token, project_id, email=account.email, timeout=6.0)
+        except Exception as exc:
+            print(f"  {account.email}: quota unavailable ({exc})")
+            continue
+        plan = snapshot.get("plan")
+        groups = snapshot.get("groups") or []
+        models = snapshot.get("models") or []
+        low = [m for m in models if _quota_mod.quota_is_low(m)]
+        print(f"  {account.email}: plan={plan or '?'}")
+        if groups:
+            for group in groups:
+                buckets = ", ".join(
+                    f"{b['displayName']} {_quota_mod.percent_label(b.get('remainingFraction'))}"
+                    for b in group.get("buckets", [])
+                )
+                print(f"    {group['displayName']} — {buckets}")
+        else:
+            print(f"    {len(models)} models advertised, {len(low)} exhausted")
 
 
 def _print_quota_status(registry: "AntigravityAccountRegistry", account: Any) -> None:
