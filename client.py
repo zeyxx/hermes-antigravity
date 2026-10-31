@@ -317,7 +317,11 @@ class AntigravityClient:
         to its registry entry. Falls back to the active manager only when
         ``account`` already carries a usable token.
         """
-        manager = AntigravityAuthManager(
+        try:
+            from .auth import AntigravityAuthManager as _AGAM
+        except ImportError:
+            from auth import AntigravityAuthManager as _AGAM
+        manager = _AGAM(
             registry=self._get_registry(),
             account_id=account.account_id,
             auto_migrate=False,
