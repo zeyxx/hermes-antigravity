@@ -865,6 +865,52 @@ def _cli_quota(registry: AntigravityAccountRegistry) -> None:
     import sys as _sys
 
     want_json = "--json" in _sys.argv[2:]
+    want_all = "--all" in _sys.argv[2:]
+
+    if want_all:
+        accounts = registry.list_accounts()
+        if not accounts:
+            print("Quota: no accounts registered.")
+            return
+        snapshots = []
+        for account in accounts:
+            mgr = AntigravityAuthManager(account_id=account.account_id, registry=registry)
+            try:
+                token, project_id = mgr.get_credentials()
+            except Exception as exc:
+                print(f"{account.email}: credentials unavailable ({exc})")
+                continue
+            try:
+                from .models import fetch_account_quota
+                from . import quota as _quota_mod
+            except ImportError:
+                from models import fetch_account_quota
+                import quota as _quota_mod
+            try:
+                snapshot = fetch_account_quota(token, project_id, email=account.email)
+            except Exception as exc:
+                print(f"{account.email}: Antigravity unreachable ({exc})")
+                continue
+            if want_json:
+                snapshots.append(snapshot)
+                continue
+            plan = snapshot.get("plan")
+            groups = snapshot.get("groups") or []
+            models = snapshot.get("models") or []
+            low = [m for m in models if _quota_mod.quota_is_low(m)]
+            print(f"{account.email}: plan={plan or '?'}")
+            if groups:
+                for group in groups:
+                    buckets = ", ".join(
+                        f"{b['displayName']} {_quota_mod.percent_label(b.get('remainingFraction'))}"
+                        for b in group.get("buckets", [])
+                    )
+                    print(f"  {group['displayName']} — {buckets}")
+            else:
+                print(f"  {len(models)} models advertised, {len(low)} exhausted")
+        if want_json:
+            print(json.dumps(snapshots, indent=2))
+        return
 
     account = registry.get_account()
     if account is None:
