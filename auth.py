@@ -1146,8 +1146,23 @@ def cli_main() -> None:
         else:
             print(f"Account not found: {target}")
 
+    elif args[0] == "clean":
+        dry_run = "--dry-run" in args or "--dry_run" in args
+        dedup = "--dedup" in args
+        summary = registry.clean(dry_run=dry_run, dedup=dedup)
+        title = "Registry cleanup (dry run — no changes written):" if dry_run else "Registry cleanup:"
+        print(title)
+        print(f"  accounts before : {summary['before']}")
+        print(f"  removed         : {summary['removed']} (stale={summary['stale_removed']}, duplicates={summary['duplicates_removed']})")
+        if summary["removed_ids"]:
+            for aid in summary["removed_ids"]:
+                print(f"    - {aid}")
+        print(f"  accounts after  : {summary['after']}")
+        if dry_run:
+            print("  (no changes written)")
+        return
+
     elif args[0] == "export":
-        # Export active account to env var format
         account = registry.get_account()
         if not account:
             print("No active account.")
@@ -1166,6 +1181,7 @@ def cli_main() -> None:
         print("  list              List all accounts")
         print("  switch <email>    Switch the active account")
         print("  remove <email>    Remove an account")
+        print("  clean [--dry-run] [--dedup]  Clean stale/duplicate accounts")
         print("  export            Export the active account tokens (env format)")
         print("  help              Show this help")
 
@@ -1176,3 +1192,11 @@ def cli_main() -> None:
 
 if __name__ == "__main__":
     cli_main()
+
+
+def clean_registry(*args, **kwargs):
+    try:
+        from .accounts import clean_registry as _cr
+    except Exception:
+        from accounts import clean_registry as _cr
+    return _cr(*args, **kwargs)

@@ -9,6 +9,7 @@ and `hermes auth remove antigravity` at plugin load time.
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any
 
 from providers import register_provider
@@ -60,6 +61,35 @@ if not _CORE_SUPPORTS_CLIENT_FACTORY:
     )
 
 
+def _resolve_pool_credential(prefer_token: str | None = None) -> Any:
+    """Resolve pool credential, honoring patches on either module."""
+    for mod_name in ("auth",):
+        mod = sys.modules.get(mod_name)
+        if mod is not None and hasattr(mod, "resolve_pool_credential"):
+            try:
+                return mod.resolve_pool_credential(prefer_token=prefer_token)
+            except TypeError:
+                return mod.resolve_pool_credential(prefer_token)
+    # Fall back to the name imported into this module (may be patched).
+    fn = globals().get("resolve_pool_credential")
+    if callable(fn):
+        try:
+            return fn(prefer_token=prefer_token)
+        except TypeError:
+            return fn(prefer_token)
+    return None
+
+
+def _registry_account_usable(account: Any) -> bool:
+    """True when the registry holds an account with a usable token."""
+    if account is None:
+        return False
+    creds = getattr(account, "credentials", None)
+    if not isinstance(creds, dict):
+        creds = {}
+    return bool(creds.get("access_token") or creds.get("refresh_token"))
+
+
 class AntigravityProfile(ProviderProfile):
     """Profile for Google Antigravity / Cloud Code Assist."""
 
@@ -70,7 +100,7 @@ class AntigravityProfile(ProviderProfile):
         row keeps inference on the credential ``auth_handler`` wrote (catalog
         review). Outside Hermes (no pool) the account registry still serves.
         """
-        leased = resolve_pool_credential(
+        leased = _resolve_pool_credential(
             prefer_token=client_kwargs.get("api_key")
             if isinstance(client_kwargs.get("api_key"), str) else None,
         )
@@ -78,6 +108,12 @@ class AntigravityProfile(ProviderProfile):
             return AntigravityClient(
                 auth_manager=AntigravityAuthManager(credentials=leased))
         registry = AntigravityAccountRegistry()
+        account = registry.get_account()
+        if not _registry_account_usable(account):
+            raise RuntimeError(
+                "Antigravity is not authenticated. Run `hermes auth add antigravity` "
+                "to sign in; inference never starts an interactive login."
+            )
         auth_mgr = AntigravityAuthManager(registry=registry)
         return AntigravityClient(auth_manager=auth_mgr)
 
@@ -94,7 +130,7 @@ class AntigravityProfile(ProviderProfile):
         the pool's selected row; the registry is the standalone fallback.
         """
         del base_url
-        leased = resolve_pool_credential(
+        leased = _resolve_pool_credential(
             prefer_token=api_key if isinstance(api_key, str) else None)
         if leased is not None:
             try:
@@ -104,6 +140,11 @@ class AntigravityProfile(ProviderProfile):
                 logger.debug("fetch_models failed: %s", exc)
                 return []
         registry = AntigravityAccountRegistry()
+        account = registry.get_account()
+        if not _registry_account_usable(account):
+            logger.debug(
+                "fetch_models: no usable account; run `hermes auth add antigravity`")
+            return []
         auth_mgr = AntigravityAuthManager(registry=registry)
         try:
             token, project_id = auth_mgr.get_credentials()

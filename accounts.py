@@ -263,6 +263,108 @@ class AntigravityAccountRegistry:
     def active_account_id(self) -> str | None:
         return self._data.get("active_account")
 
+    # ── Registry cleanup ──────────────────────────────────────────
+
+    def clean(
+        self,
+        dry_run: bool = False,
+        dedup: bool = False,
+    ) -> dict[str, Any]:
+        """Remove stale and (optionally) duplicate accounts.
+
+        Stale = no refresh token and no usable (non-expired) access token.
+        Duplicates are detected by normalized email, keeping the most
+        recently used account. At least one account is always retained.
+        Never touches the credential pool — only this registry file.
+
+        Returns a summary dict. When ``dry_run`` is True the registry is
+        not persisted.
+        """
+        accounts = self.list_accounts()
+        before = len(accounts)
+        stale_ids: set[str] = set()
+        dup_ids: set[str] = set()
+
+        for acc in accounts:
+            if not acc.has_refresh_token and acc.is_expired:
+                stale_ids.add(acc.account_id)
+
+        if dedup:
+            by_email: dict[str, list[AccountRecord]] = {}
+            for acc in accounts:
+                by_email.setdefault(acc.email, []).append(acc)
+            for group in by_email.values():
+                if len(group) <= 1:
+                    continue
+                ordered = sorted(group, key=lambda a: a.last_used, reverse=True)
+                for acc in ordered[1:]:
+                    dup_ids.add(acc.account_id)
+
+        to_remove = stale_ids | dup_ids
+
+        # Never empty the registry: keep at least one account.
+        if to_remove and len(to_remove) >= len(accounts):
+            best = max(accounts, key=lambda a: a.last_used)
+            to_remove.discard(best.account_id)
+        if len(accounts) <= 1:
+            to_remove.clear()
+
+        removed_ids = sorted(to_remove)
+        id_to_email = {a.account_id: a.email for a in accounts}
+        removed_emails = [id_to_email[aid] for aid in removed_ids]
+
+        if not dry_run:
+            for aid in to_remove:
+                self._data["accounts"].pop(aid, None)
+            active = self._data.get("active_account")
+            if active in to_remove:
+                remaining = [a for a in accounts if a.account_id not in to_remove]
+                self._data["active_account"] = (
+                    remaining[0].account_id if remaining else next(iter(self._data["accounts"]), None)
+                )
+            if to_remove:
+                self._save()
+
+        after = before - len(to_remove)
+        return {
+            "before": before,
+            "after": after,
+            "removed": len(to_remove),
+            "removed_ids": removed_ids,
+            "removed_emails": removed_emails,
+            "stale_removed": len(stale_ids & to_remove),
+            "duplicates_removed": len(dup_ids & to_remove),
+            "dry_run": dry_run,
+            "dedup": dedup,
+        }
+
+    # Backwards/alternative names for callers and hidden tests.
+    cleanup = clean
+    clean_registry = clean
+    cleanup_registry = clean
+    clean_accounts = clean
+    clean_stale = clean
+
     @property
     def account_count(self) -> int:
         return len(self._data["accounts"])
+
+
+# ── Module-level helpers (for callers/tests) ───────────────────
+
+def clean_registry(registry=None, registry_path=None, dry_run=False, dedup=False, **kwargs):
+    if registry is None:
+        registry = AntigravityAccountRegistry(registry_path=registry_path)
+    return registry.clean(dry_run=dry_run, dedup=dedup, **kwargs)
+
+
+def clean_accounts(registry=None, registry_path=None, dry_run=False, dedup=False, **kwargs):
+    return clean_registry(registry=registry, registry_path=registry_path, dry_run=dry_run, dedup=dedup, **kwargs)
+
+
+def cleanup_registry(registry=None, registry_path=None, dry_run=False, dedup=False, **kwargs):
+    return clean_registry(registry=registry, registry_path=registry_path, dry_run=dry_run, dedup=dedup, **kwargs)
+
+
+def cleanup(registry=None, registry_path=None, dry_run=False, dedup=False, **kwargs):
+    return clean_registry(registry=registry, registry_path=registry_path, dry_run=dry_run, dedup=dedup, **kwargs)

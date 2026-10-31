@@ -20,6 +20,10 @@ def test_antigravity_profile_registered():
 
 
 def test_antigravity_create_client_hook():
+    # Seed a usable account so the hardened fallback path can build a client.
+    from accounts import AntigravityAccountRegistry
+    reg = AntigravityAccountRegistry()
+    reg.add_account("test@example.com", {"access_token": "tok", "refresh_token": "ref", "expires_at": 9e9, "project_id": "p"})
     profile = get_provider_profile("antigravity")
     assert profile is not None
     client = profile.create_client()
