@@ -182,8 +182,8 @@ class AntigravityAuthManager:
         registry: AntigravityAccountRegistry | None = None,
         auto_migrate: bool = True,
     ) -> None:
-        self.client_id = os.environ.get("ANTIGRAVITY_CLIENT_ID", client_id)
-        self.client_secret = os.environ.get("ANTIGRAVITY_CLIENT_SECRET", client_secret)
+        self._default_client_id = client_id
+        self._default_client_secret = client_secret
         self._registry = registry or AntigravityAccountRegistry()
         self._account_id = account_id
         self._account_record: AccountRecord | None = None
@@ -194,6 +194,38 @@ class AntigravityAuthManager:
         else:
             # Load from registry
             self._load_from_registry(auto_migrate=auto_migrate)
+
+    @property
+    def client_id(self) -> str:
+        # Resolved at call time through Hermes's secret route (profile-aware),
+        # falling back to the process env for standalone/single-profile runs.
+        try:
+            from agent.secret_scope import get_secret_str
+
+            val = get_secret_str("ANTIGRAVITY_CLIENT_ID", "")
+            if val:
+                return val
+        except Exception:
+            pass
+        env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
+        if env:
+            return env
+        return self._default_client_id
+
+    @property
+    def client_secret(self) -> str:
+        try:
+            from agent.secret_scope import get_secret_str
+
+            val = get_secret_str("ANTIGRAVITY_CLIENT_SECRET", "")
+            if val:
+                return val
+        except Exception:
+            pass
+        env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
+        if env:
+            return env
+        return self._default_client_secret
 
     def _load_from_registry(self, auto_migrate: bool = True) -> None:
         """Load credentials from the account registry."""
@@ -457,9 +489,10 @@ class AntigravityAuthManager:
         triggers interactive login.
         """
         if not self.credentials or not self.credentials.get("access_token"):
-            self.login_interactive()
-            if not self.credentials.get("access_token"):
-                raise RuntimeError("Authentication failed: no access_token obtained")
+            raise RuntimeError(
+                "Antigravity is not authenticated. Run `hermes auth add antigravity` "
+                "to sign in; inference never starts an interactive login."
+            )
 
         # Check expiration (< 5 min)
         if time.time() > self.credentials.get("expires_at", 0) - 300:
@@ -471,9 +504,10 @@ class AntigravityAuthManager:
                 except Exception as exc:
                     logger.warning("Token refresh failed: %s, prompting interactive login", exc)
             if not refreshed:
-                self.login_interactive()
-                if not self.credentials.get("access_token"):
-                    raise RuntimeError("Re-authentication failed: no access_token obtained")
+                raise RuntimeError(
+                    "Antigravity token refresh failed and no interactive login is "
+                    "allowed on the inference path. Run `hermes auth add antigravity`."
+                )
 
         return self.credentials["access_token"], self.credentials.get(
             "project_id", "antigravity-default"
@@ -527,30 +561,19 @@ def antigravity_refresh_credential(entry: Any) -> dict[str, Any] | None:
     token itself is re-read from the account registry rather than trusted from
     the pool row, so a stale pool copy cannot pin a dead pair.
     """
-    registry = AntigravityAccountRegistry()
     access = (getattr(entry, "access_token", "") or "").strip()
     refresh = (getattr(entry, "refresh_token", "") or "").strip()
     if not refresh:
         return None
 
-    account = None
-    for candidate in registry.list_accounts():
-        creds = candidate.credentials or {}
-        if creds.get("access_token") == access or creds.get("refresh_token") == refresh:
-            account = candidate
-            break
-
-    manager = AntigravityAuthManager(
-        registry=registry,
-        account_id=account.account_id if account else None,
-        credentials=dict(account.credentials) if account else None,
-    )
-    if account is not None:
-        # The manager only persists when it loaded the account through the
-        # registry; an explicitly-passed credential leaves that field unset,
-        # so restore it here to keep the account registry in sync.
-        manager._account_record = account
-        manager._account_id = account.account_id
+    creds = {
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_at": getattr(entry, "expires_at", None),
+        "project_id": (getattr(entry, "extra", {}) or {}).get("project_id")
+        or "antigravity-default",
+    }
+    manager = AntigravityAuthManager(credentials=creds, auto_migrate=False)
     rotated = manager.refresh_access_token()
     refreshed_credentials = manager.credentials or {}
     expires_at = refreshed_credentials.get("expires_at")

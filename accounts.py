@@ -20,18 +20,16 @@ REGISTRY_VERSION = 2
 
 # Paths
 def _hermes_home() -> Path:
-    """Hermes root, honouring HERMES_HOME the way the core does.
+    """Hermes home for the *current* profile, resolved at call time.
 
-    Resolved through the core's own helper so a profile (`hermes -p ...`, or a
-    HERMES_HOME override) keeps its accounts with the rest of that profile. A
-    hardcoded ~/.hermes made every profile silently share one registry, which
-    looked like correct behaviour but broke the moment the core honoured
-    HERMES_HOME for real.
+    Uses ``get_hermes_home`` (context-aware) so a profile never reads or
+    writes another profile's registry. Falls back to the env/platform default
+    only when the core helper is unavailable (standalone/test use).
     """
     try:
-        from hermes_constants import get_default_hermes_root
+        from hermes_constants import get_hermes_home
 
-        return Path(get_default_hermes_root())
+        return Path(get_hermes_home())
     except Exception:
         env = os.environ.get("HERMES_HOME", "").strip()
         return Path(os.path.expanduser(env)) if env else Path.home() / ".hermes"
@@ -98,7 +96,9 @@ class AccountRecord:
 class AntigravityAccountRegistry:
     """Manages multiple Antigravity accounts with persistent storage."""
 
-    def __init__(self, registry_path: Path | str = DEFAULT_REGISTRY_PATH) -> None:
+    def __init__(self, registry_path: Path | str | None = None) -> None:
+        if registry_path is None:
+            registry_path = _hermes_home() / "antigravity-accounts.json"
         self.registry_path = Path(registry_path).expanduser()
         self._data: dict[str, Any] = {"version": REGISTRY_VERSION, "active_account": None, "accounts": {}}
         self._load()
