@@ -773,11 +773,75 @@ def _antigravity_auth_status(args: Any) -> bool:
         print(f"  api_base_url: {base_url}")
 
     registry = AntigravityAccountRegistry()
+
+    # Show quota for the accounts that actually exist in the Hermes credential
+    # pool (the same set `hermes auth list` reports), not for stale registry
+    # entries that may have been left behind by older versions.
+    pool_entries = [
+        e for e in load_pool(provider).entries()
+        if (e.access_token or e.agent_key or "").strip()
+        and (getattr(e, "label", "") or "") not in _NON_BEARER_LABELS
+    ]
+
     account = registry.get_account()
     if account is not None:
         print(f"  account: {account.email}")
 
-    _print_all_account_quotas(registry)
+    printed = False
+    for entry in pool_entries:
+        extra = getattr(entry, "extra", None) or {}
+        email = extra.get("email") or getattr(entry, "label", "") or "unknown"
+        project_id = extra.get("project_id") or "antigravity-default"
+        creds = {
+            "access_token": (getattr(entry, "access_token", "") or "").strip(),
+            "refresh_token": (getattr(entry, "refresh_token", "") or "").strip() or None,
+            "expires_at": (float(getattr(entry, "expires_at_ms", 0) or 0) / 1000.0)
+            if getattr(entry, "expires_at_ms", None)
+            else None,
+            "project_id": project_id,
+        }
+        mgr = AntigravityAuthManager(credentials=creds, auto_migrate=False)
+        try:
+            token, project_id = mgr.get_credentials()
+        except Exception as exc:
+            # get_credentials may have refreshed; if still no token, try entry token
+            token = creds["access_token"]
+            if not token:
+                print(f"  {email}: credentials unavailable ({exc})")
+                continue
+        try:
+            from .models import fetch_account_quota
+            from . import quota as _quota_mod
+        except ImportError:
+            from models import fetch_account_quota
+            import quota as _quota_mod
+        try:
+            snapshot = fetch_account_quota(token, project_id, email=email, timeout=6.0)
+        except Exception as exc:
+            print(f"  {email}: quota unavailable ({exc})")
+            continue
+        printed = True
+        plan = snapshot.get("plan")
+        groups = snapshot.get("groups") or []
+        models = snapshot.get("models") or []
+        low = [m for m in models if _quota_mod.quota_is_low(m)]
+        print(f"  {email}: plan={plan or '?'}")
+        if groups:
+            for group in groups:
+                buckets = ", ".join(
+                    f"{b['displayName']} {_quota_mod.percent_label(b.get('remainingFraction'))}"
+                    for b in group.get("buckets", [])
+                )
+                print(f"    {group['displayName']} — {buckets}")
+        else:
+            print(f"    {len(models)} models advertised, {len(low)} exhausted")
+
+    if not printed and not pool_entries:
+        account = registry.get_account()
+        if account is not None:
+            print(f"  account: {account.email}")
+            _print_quota_status(registry, account)
+
     return True
 
 
