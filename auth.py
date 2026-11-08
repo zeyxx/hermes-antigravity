@@ -255,6 +255,8 @@ class AntigravityAuthManager:
         """Persist current credentials back to the registry."""
         if self._account_id and self._account_record:
             self._registry.update_credentials(self._account_id, self.credentials)
+        if hasattr(self._registry, "sync_hermes_auth"):
+            self._registry.sync_hermes_auth()
 
     def refresh_access_token(self) -> str:
         """Exchange refresh_token for a new access_token."""
@@ -752,6 +754,11 @@ def _antigravity_auth_status(args: Any) -> bool:
     """
     from agent.credential_pool import load_pool
 
+    # Loading the registry mirrors the active account into the standard
+    # Hermes credentials (auth.json) as a side effect; do it before reading
+    # the pool so a registry-only account still appears in this status.
+    registry = AntigravityAccountRegistry()
+
     provider = getattr(args, "provider", "antigravity") or "antigravity"
     entries = [
         e for e in load_pool(provider).entries()
@@ -771,8 +778,6 @@ def _antigravity_auth_status(args: Any) -> bool:
     base_url = next((e.base_url for e in live if e.base_url), "") or ""
     if base_url:
         print(f"  api_base_url: {base_url}")
-
-    registry = AntigravityAccountRegistry()
 
     # Show quota for the accounts that actually exist in the Hermes credential
     # pool (the same set `hermes auth list` reports), not for stale registry

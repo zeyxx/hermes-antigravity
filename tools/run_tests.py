@@ -39,6 +39,7 @@ MODULES = (
     "tests.test_models",
     "tests.test_quota",
     "tests.test_accounts",
+    "tests.test_hermes_auth_sync",
     "tests.test_auth",
     "tests.test_client",
     "tests.test_provider_registration",

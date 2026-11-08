@@ -9,7 +9,9 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,170 @@ DEFAULT_REGISTRY_PATH = HERMES_ROOT / "antigravity-accounts.json"
 def _account_id_from_email(email: str) -> str:
     """Generate a stable, opaque account identifier from an email."""
     return hashlib.sha256(email.lower().strip().encode("utf-8")).hexdigest()[:16]
+
+
+# ── Hermes standard credentials sync ──────────────────────────────
+# Hermes core reads provider credentials from ~/.hermes/auth.json
+# (``providers.<id>`` singleton + ``credential_pool``), while this plugin
+# keeps the multi-account truth in antigravity-accounts.json next to it.
+# Without a sync, `hermes auth status antigravity` reports "logged out"
+# despite a live registry account (nothing ever wrote auth.json).
+
+ANTIGRAVITY_AUTH_BASE_URL = "https://daily-cloudcode-pa.googleapis.com"
+
+
+def _expires_at_iso(credentials: dict[str, Any]) -> str | None:
+    """Registry epoch -> Hermes native ISO-8601 expiry (None when unknown)."""
+    raw = credentials.get("expires_at")
+    if isinstance(raw, str) and "T" in raw:
+        return raw
+    if raw is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _hermes_auth_state(account: "AccountRecord") -> dict[str, Any]:
+    """Active account as a Hermes native ``providers.antigravity`` state."""
+    creds = account.credentials
+    state: dict[str, Any] = {
+        "access_token": creds.get("access_token", ""),
+        "refresh_token": creds.get("refresh_token", ""),
+        "expires_at": _expires_at_iso(creds),
+        "project_id": creds.get("project_id", "antigravity-default"),
+        "email": account.email,
+    }
+    return {k: v for k, v in state.items() if v not in ("", None)}
+
+
+def _hermes_pool_row(account: "AccountRecord") -> dict[str, Any]:
+    """Active account as a ``credential_pool.antigravity`` row.
+
+    The status path leases rows via ``agent.credential_pool.load_pool``
+    (not ``providers.*``), so the row must carry the same token material.
+    """
+    creds = account.credentials
+    expires_iso = _expires_at_iso(creds)
+    expires_ms = None
+    if expires_iso:
+        try:
+            expires_ms = int(datetime.fromisoformat(expires_iso).timestamp() * 1000)
+        except ValueError:
+            expires_ms = None
+    row: dict[str, Any] = {
+        "id": account.account_id[:6],
+        "label": f"{account.email}-oauth-1",
+        "auth_type": "oauth",
+        "priority": 0,
+        "source": "manual:antigravity_pkce",
+        "access_token": creds.get("access_token", ""),
+        "refresh_token": creds.get("refresh_token") or None,
+        "base_url": ANTIGRAVITY_AUTH_BASE_URL,
+        "expires_at": expires_iso,
+        "expires_at_ms": expires_ms,
+        "extra": {
+            "project_id": creds.get("project_id", "antigravity-default"),
+            "email": account.email,
+        },
+    }
+    return {k: v for k, v in row.items() if v is not None}
+
+
+def _pool_row_matches(row: dict[str, Any], account: "AccountRecord") -> bool:
+    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+    if (extra.get("email") or "") == account.email:
+        return True
+    label = str(row.get("label") or "")
+    return bool(account.email) and account.email in label
+
+
+def _atomic_write_auth_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write auth.json atomically with 0600 perms (never a half-written store)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".auth-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+
+def sync_active_account_to_hermes_auth(
+    registry: "AntigravityAccountRegistry",
+    auth_path: Path | str | None = None,
+) -> bool:
+    """Mirror the registry's active account into Hermes ``auth.json``.
+
+    Writes the ``providers.antigravity`` singleton plus one
+    ``credential_pool.antigravity`` row (upserted by email, other rows and
+    other providers preserved, ``active_provider`` untouched). Returns
+    True when a usable active account was synced. Never raises: auth.json
+    must not take the registry (or the status path) down with it.
+    """
+    try:
+        account = registry.get_account()
+        creds = account.credentials if account else {}
+        usable = bool(account and (creds.get("access_token") or creds.get("refresh_token")))
+        if not usable:
+            account = None
+
+        path = Path(auth_path).expanduser() if auth_path else (
+            registry.registry_path.parent / "auth.json"
+        )
+        if not usable:
+            # No active account: drop a stale singleton instead of advertising
+            # credentials for an account that no longer exists. Pool rows are
+            # the pool's own business (pool logout owns them) and are kept.
+            if path.is_file():
+                store = json.loads(path.read_text(encoding="utf-8"))
+                providers = store.get("providers") if isinstance(store, dict) else None
+                if isinstance(providers, dict) and "antigravity" in providers:
+                    providers.pop("antigravity", None)
+                    _atomic_write_auth_json(path, store)
+            return False
+
+        if path.is_file():
+            store = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(store, dict):
+                logger.debug("auth sync: %s is not a JSON object; skipping", path)
+                return False
+        else:
+            store = {"version": 1, "providers": {}}
+
+        providers = store.get("providers")
+        if not isinstance(providers, dict):
+            providers = store["providers"] = {}
+        providers["antigravity"] = _hermes_auth_state(account)
+
+        pool = store.get("credential_pool")
+        if not isinstance(pool, dict):
+            pool = store["credential_pool"] = {}
+        rows = pool.get("antigravity")
+        if not isinstance(rows, list):
+            rows = pool["antigravity"] = []
+        fresh_row = _hermes_pool_row(account)
+        for row in rows:
+            if isinstance(row, dict) and _pool_row_matches(row, account):
+                row.update({k: v for k, v in fresh_row.items() if k != "extra"})
+                merged_extra = dict(row.get("extra") or {})
+                merged_extra.update(fresh_row["extra"])
+                row["extra"] = merged_extra
+                break
+        else:
+            rows.append(fresh_row)
+
+        _atomic_write_auth_json(path, store)
+        return True
+    except Exception as exc:
+        logger.debug("auth sync failed (non-fatal): %s", exc)
+        return False
 
 
 class AccountRecord:
@@ -123,6 +289,7 @@ class AntigravityAccountRegistry:
 
             if data.get("version") == REGISTRY_VERSION:
                 self._data = data
+                self.sync_hermes_auth()
             else:
                 logger.warning(
                     "Registry version mismatch (expected %d, got %s) — starting empty",
@@ -141,6 +308,11 @@ class AntigravityAccountRegistry:
             os.chmod(self.registry_path, 0o600)
         except Exception:
             pass
+        self.sync_hermes_auth()
+
+    def sync_hermes_auth(self) -> bool:
+        """Mirror the active account into Hermes ``auth.json`` (see module note)."""
+        return sync_active_account_to_hermes_auth(self)
 
     # ── Account CRUD ──────────────────────────────────────────────
 
