@@ -8,7 +8,7 @@ even with a live registry account, because nothing ever wrote auth.json.
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 

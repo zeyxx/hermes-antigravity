@@ -21,7 +21,7 @@ try:
         AntigravityAuthManager,
         antigravity_auth_handler,
         antigravity_refresh_credential,
-        resolve_pool_credential,
+        resolve_pool_credential as resolve_pool_credential,
     )
     from .client import AntigravityClient
     from .models import fetch_available_models
@@ -31,7 +31,7 @@ except ImportError:
     AntigravityAuthManager,
     antigravity_auth_handler,
     antigravity_refresh_credential,
-    resolve_pool_credential,
+    resolve_pool_credential as resolve_pool_credential,
 )
     from client import AntigravityClient
     from models import fetch_available_models

@@ -47,6 +47,11 @@ jobs:
             "$RUNNER_TEMP/hermes-agent"
           echo "HERMES_CORE=$RUNNER_TEMP/hermes-agent" >> "$GITHUB_ENV"
 
+      - name: Install Hermes core test dependency
+        # The core's provider registry imports hermes_yaml via hermes_cli.plugins.
+        # This is a test environment dependency, not a plugin dependency.
+        run: python -m pip install --quiet ruamel.yaml
+
       - name: Collect test count
         # Recorded before the run: a module that fails to import silently drops its
         # tests, and a suite that only runs a subset still reports green.
