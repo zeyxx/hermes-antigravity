@@ -1,23 +1,45 @@
 # Google Antigravity Provider Plugin for Hermes Agent
 
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [🇬🇧 English Version](README.md) | [🇫🇷 Version Française](README.fr.md)
 
----
+## ⚠️ Risk disclaimer — read BEFORE you sign in
+
+This plugin authenticates with **Google Antigravity / Cloud Code Assist via OAuth
+(PKCE)** and connects to `cloudcode-pa.googleapis.com` through **Antigravity OAuth,
+not the official Antigravity CLI**.
+
+**This is a breach of Google's Antigravity Terms of Service** (Google
+Antigravity Additional Terms, §6):
+
+> "You must not abuse, harm, interfere with, or disrupt the Service. This
+> includes, but is not limited to, using the Service in connection with products
+> not provided by us. Using third party software, tools, or services to access
+> the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this
+> Agreement. Such actions may be grounds for suspension or termination of your
+> Antigravity and/or Gemini CLI accounts."
+
+Google states that this can lead to **suspension or termination of Antigravity
+and/or Gemini CLI accounts**. The maintainer has experienced an account ban.
+Enterprise accounts may be subject to different agreements; consult your administrator.
+
+For third-party agents, Google recommends a [Google AI Studio API key or Gemini
+Enterprise](https://antigravity.google/docs/faq#why-cant-i-use-third-party-software-such-as-claude-code-openclaw-or-opencode-with-my-antigravity-login).
+These are separate services and may have their own pricing and terms. Read the
+[Antigravity terms, section 6](https://antigravity.google/terms), before proceeding.
+
+**This plugin is NOT in the official Hermes Agent provider catalog** (refused
+2026-10-24 because it ships the official Antigravity client fingerprint, which
+the catalog does not accept). It is distributed from this repository only.
 
 A native inference provider plugin integrating **Google Antigravity / Cloud Code Assist** into **Hermes Agent** (`nousresearch/hermes-agent`). It enables running state-of-the-art Gemini and Claude models with full streaming support, native tool calling (function calling), and reasoning/thinking tokens.
 
-### 🎓 Built for Gemini Pro, Student & Google One AI Subscriptions
-Google does **not** provide API keys for consumer or student subscriptions (Gemini Pro Student, Gemini Advanced, Google One AI Premium, Google Workspace for Education). Historically, Hermes Agent could only connect to Google via Google AI Studio API keys (`GOOGLE_API_KEY`) or Vertex AI service accounts, leaving subscription holders unable to use their quota.
-
-This plugin solves that problem: it authenticates directly with your Google account via OAuth 2.0 PKCE, unlocking your subscription models in Hermes Agent without burning paid API tokens!
+The plugin uses Antigravity OAuth to access subscription models outside Google's official client. This access violates the terms described above; it is not a supported alternative to an API key.
 
 **Provenance:** this plugin originated as a Python adaptation of the [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) extension for the Pi Coding Agent by Rahul Arya ([@Rahularya01](https://github.com/Rahularya01)), re-architected as a native Hermes `ProviderProfile`. It is now maintained independently: wire behavior is validated directly against the official Antigravity CLI (measured fingerprint) and the live Cloud Code Assist relay (live model discovery, quota, retirement tags) — not by tracking pi-antigravity's advances. pi-antigravity remains credited below as the project that pioneered the reverse-engineering. Every wire constant is tracked in [`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md) so divergence from the measured reference is visible rather than silent. See [Acknowledgements & Provenance](#-acknowledgements--provenance).
-
 
 ## 🏗️ Architecture
 
@@ -270,19 +292,7 @@ No pytest, no dependencies: the runner is standard library only (see
 
 ---
 
-## ⚠️ Disclaimer — read this before signing in
-
-This plugin uses Google's Cloud Code Assist endpoints (`cloudcode-pa.googleapis.com`) through **Antigravity OAuth**, outside the official Antigravity CLI. **This is a breach of Google's Antigravity Terms of Service.** The terms are explicit:
-
-> "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for **suspension or termination of your Antigravity and/or Gemini CLI accounts**."
-
-This is **not theoretical**. Google has run active enforcement waves disabling accounts that access Antigravity through third-party OAuth clients. Bans have also cut off **Gemini CLI and Gemini Code Assist** access on the same account, and a second flag is a **permanent** ban. A personal Google account can carry unrelated services you care about.
-
-**The compliant alternative:** use a **Gemini AI Studio / Google AI Studio API key** (pay-per-token) with a Gemini provider, instead of Antigravity OAuth. The terms only prohibit piggybacking on the *subscription* OAuth; a metered API key is the supported path.
-
-`hermes auth add antigravity` prints this warning before it starts the OAuth flow. If you proceed, you accept the account risk.
-
-### TLS transport (detection surface)
+## TLS transport (detection surface)
 
 The official `agy` client is a **Go** binary; this plugin speaks TLS through Python's stdlib `ssl`/OpenSSL with a default handshake. Their TLS ClientHello (and thus their JA3 fingerprint) differs, and that gap is **left as-is**: probed 2026-10-14, the relay answers 200 over the default handshake, so fingerprint tuning was removed (no mimicry without a measured need). The stdlib-vs-Go gap is still documented in `UPSTREAM_DRIFT.md` and measured by `tools/transport_check.py`. This does **not** make the integration ToS-compliant.
 
