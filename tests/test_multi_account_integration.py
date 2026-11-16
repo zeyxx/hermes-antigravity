@@ -7,7 +7,6 @@ refresh token, then retry the request with the new bearer. No real HTTP is
 performed: both the network opener and the OAuth refresh are mocked.
 """
 import io
-import json
 import tempfile
 import urllib.error
 from pathlib import Path
@@ -50,7 +49,7 @@ def test_multi_account_429_failover_uses_second_accounts_refresh_token():
         "project_id": "proj-old",
     })
 
-    exhausted_id = reg.get_account("exhausted@example.com").account_id
+    assert reg.get_account("exhausted@example.com") is not None
     target_id = reg.get_account("target@example.com").account_id
 
     client = _client_for(reg)
