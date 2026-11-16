@@ -32,9 +32,8 @@ logger = logging.getLogger(__name__)
 # Shown before the OAuth flow starts, at the moment of risk. Google's Antigravity
 # Additional Terms state that using third-party software to access the Service
 # with Antigravity OAuth is a breach "and may be grounds for suspension or
-# termination of your Antigravity and/or Gemini CLI accounts." This is not
-# theoretical: Google has run enforcement waves disabling such accounts, with
-# permanent bans on a second flag. The user must see this before signing in.
+# termination of your Antigravity and/or Gemini CLI accounts." The user must
+# see this before signing in.
 _TOS_WARNING = (
     "WARNING: Google's Terms of Service prohibit accessing Antigravity with "
     "third-party software using Antigravity OAuth.\n"
@@ -309,6 +308,7 @@ class AntigravityAuthManager:
                 "(no browser flow started). Run `hermes auth add antigravity` "
                 "from a terminal to sign in."
             )
+        print(_TOS_WARNING)
         verifier, challenge = generate_pkce()
         state = secrets.token_hex(16)
         params = {
@@ -712,7 +712,6 @@ def antigravity_auth_handler(action: str, args: Any) -> bool:
 def _antigravity_auth_add(args: Any) -> bool:
     from agent.credential_pool import load_pool
 
-    print(_TOS_WARNING)
     from uuid import uuid4
 
     from agent.credential_pool import PooledCredential

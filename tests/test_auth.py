@@ -286,50 +286,71 @@ def test_auth_add_warns_about_google_tos_before_login(monkeypatch=None):
     """
     import io
     import sys
-    import tempfile
     from contextlib import redirect_stdout
-    from pathlib import Path
-    from unittest.mock import patch
+    from unittest.mock import MagicMock
 
     import auth as auth_mod
 
-    fake_login = {
-        "email": "titouan@example.com",
-        "access_token": "tok", "refresh_token": "rt",
-        "expires_at": 9e9, "project_id": "proj", "scope": "",
-    }
-
-    sandbox = Path(tempfile.mkdtemp())
-    monkeypatch = __import__("os").environ
-    monkeypatch["HERMES_HOME"] = str(sandbox)
-
-    class _Pool:
-        def entries(self):
-            return []
-        def add_entry(self, entry):
-            return entry
+    class StopBeforeOAuth(Exception):
+        pass
 
     fake = type(sys)("agent.credential_pool")
-    fake.load_pool = lambda *a, **k: _Pool()
+    fake.load_pool = lambda *a, **k: MagicMock()
     fake.PooledCredential = _StubPooledCredential
-    saved = sys.modules.get("agent.credential_pool")
-    sys.modules["agent.credential_pool"] = fake
-    try:
-        buf = io.StringIO()
-        with patch.object(auth_mod, "_antigravity_oauth_login", return_value=fake_login), \
-             redirect_stdout(buf):
+    output = io.StringIO()
+    with patch.dict(sys.modules, {"agent.credential_pool": fake}), \
+         patch.object(sys.stdin, "isatty", return_value=True), \
+         patch.object(auth_mod, "AntigravityAccountRegistry", return_value=MagicMock()), \
+         patch.object(auth_mod.AntigravityAuthManager, "_load_from_registry"), \
+         patch.object(auth_mod, "generate_pkce", side_effect=StopBeforeOAuth), \
+         redirect_stdout(output):
+        try:
             auth_mod.antigravity_auth_handler("add", type("A", (), {"label": None})())
-    finally:
-        if saved is not None:
-            sys.modules["agent.credential_pool"] = saved
+        except StopBeforeOAuth:
+            pass
         else:
-            sys.modules.pop("agent.credential_pool", None)
+            raise AssertionError("the interactive login path was not reached")
 
-    out = buf.getvalue()
+    out = output.getvalue()
     assert "Terms of Service" in out, "the add path must warn about the ToS"
     assert "suspension or termination" in out.lower(), (
         "the warning must state the concrete account risk")
     assert "API key" in out, "the warning must point at the compliant alternative"
+
+
+def test_standalone_login_warns_before_starting_oauth():
+    """The standalone CLI must warn before generating OAuth parameters."""
+    import io
+    import sys
+    from contextlib import redirect_stdout
+    from unittest.mock import MagicMock
+
+    import auth as auth_mod
+
+    output = io.StringIO()
+    class StopBeforeOAuth(Exception):
+        pass
+
+    def stop_before_oauth():
+        raise StopBeforeOAuth
+
+    with patch.object(sys, "argv", ["auth.py", "login"]), \
+         patch.object(sys.stdin, "isatty", return_value=True), \
+         patch.object(auth_mod, "AntigravityAccountRegistry", return_value=MagicMock()), \
+         patch.object(auth_mod.AntigravityAuthManager, "_load_from_registry"), \
+         patch.object(auth_mod, "generate_pkce", side_effect=stop_before_oauth), \
+         redirect_stdout(output):
+        try:
+            auth_mod.cli_main()
+        except StopBeforeOAuth:
+            pass
+        else:
+            raise AssertionError("the interactive login path was not reached")
+
+    warning = output.getvalue()
+    assert "Terms of Service" in warning, "standalone login must warn before OAuth"
+    assert "suspension or termination" in warning.lower()
+    assert "API key" in warning
 
 
 def _fake_pool_module(rows, *, available=True):
