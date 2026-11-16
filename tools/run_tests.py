@@ -44,6 +44,7 @@ MODULES = (
     "tests.test_client",
     "tests.test_provider_registration",
     "tests.test_tls_profile",
+    "tests.test_release_gate",
 )
 
 
