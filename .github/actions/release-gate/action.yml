@@ -1,0 +1,36 @@
+name: Verify release
+description: Verify release versions, tests, and upstream drift before publication
+inputs:
+  tag:
+    description: Release tag to verify
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install Hermes core test dependency
+      shell: bash
+      run: python -m pip install --quiet ruamel.yaml
+
+    - name: Verify release version
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: python tools/check_release_version.py "$RELEASE_TAG"
+
+    - name: Fetch Hermes core
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+        echo "HERMES_CORE=$RUNNER_TEMP/hermes-agent" >> "$GITHUB_ENV"
+
+    - name: Run test suite
+      shell: bash
+      run: |
+        count=$(python tools/run_tests.py --collect-only)
+        echo "collected $count tests"
+        test "$count" -gt 0
+        python tools/run_tests.py --min-tests "$count"
+
+    - name: Upstream drift check
+      shell: bash
+      run: python tools/check_upstream_drift.py
