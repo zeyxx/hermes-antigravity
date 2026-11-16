@@ -7,14 +7,23 @@
 
 [🇬🇧 English Version](README.md) | [🇫🇷 Version Française](README.fr.md)
 
+## ⚠️ Avertissement — à lire avant toute connexion
+
+Ce plugin utilise l'authentification OAuth Antigravity dans un logiciel tiers.
+**Cela viole les [conditions d'utilisation Antigravity de Google, section 6](https://antigravity.google/terms).**
+Google indique que cela peut entraîner la **suspension ou la suppression des
+comptes Antigravity et/ou Gemini CLI**. Le mainteneur a subi un bannissement.
+Les comptes d'entreprise peuvent dépendre d'autres accords : consultez votre administrateur.
+
+Pour les agents tiers, Google recommande une [clé API Google AI Studio ou Gemini
+Enterprise](https://antigravity.google/docs/faq#why-cant-i-use-third-party-software-such-as-claude-code-openclaw-or-opencode-with-my-antigravity-login).
+Ces services sont distincts et peuvent avoir leurs propres tarifs et conditions.
+
 ---
 
 Ce plugin intègre l'infrastructure d'inférence **Google Antigravity / Cloud Code Assist** dans **Hermes Agent** (`nousresearch/hermes-agent`). Il permet d'utiliser les modèles de pointe Gemini et Claude avec un support complet du streaming, du tool calling (function calling) et des tokens de réflexion (thinking/reasoning).
 
-### 🎓 Conçu pour les abonnements Gemini Pro, Étudiants & Google One AI
-Google ne fournit **pas** de clés d'API pour les abonnements grand public ou étudiants (Gemini Pro Étudiant, Gemini Advanced, Google One AI Premium, Google Workspace for Education). Jusqu'à présent, Hermes Agent ne pouvait se connecter à Google que via des clés d'API Google AI Studio (`GOOGLE_API_KEY`) ou Vertex AI, empêchant les titulaires d'abonnements d'utiliser leurs quotas.
-
-Ce plugin résout ce problème : il s'authentifie directement avec votre compte Google via OAuth 2.0 PKCE, débloquant l'ensemble des modèles de votre abonnement dans Hermes Agent sans consommer de tokens payants !
+Le plugin utilise OAuth Antigravity pour accéder aux modèles d'abonnement en dehors du client officiel de Google. Cet accès viole les conditions décrites ci-dessus ; ce n'est pas une alternative prise en charge à une clé API.
 **Provenance :** ce plugin est né comme une adaptation Python de [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) par Rahul Arya ([@Rahularya01](https://github.com/Rahularya01)), ré-architecturée en `ProviderProfile` natif Hermes. Il est aujourd'hui maintenu de façon indépendante : son comportement wire est validé directement contre le CLI officiel Antigravity (empreinte mesurée) et le relay Cloud Code Assist live (découverte live des modèles, quotas, tags de retrait) — et non en suivant les avancées de pi-antigravity. pi-antigravity reste crédité ci-dessous comme le projet pionnier du reverse-engineering. Chaque constante wire est suivie dans [`UPSTREAM_DRIFT.md`](UPSTREAM_DRIFT.md), afin qu'une divergence avec la référence mesurée reste visible au lieu d'être silencieuse. Voir [Remerciements & Provenance](#-remerciements--provenance-open-source).
 
 
@@ -285,19 +294,7 @@ Ni pytest, ni dépendances : le lanceur n'utilise que la bibliothèque standard
 
 ---
 
-## ⚠️ Avertissement — à lire avant de vous connecter
-
-Ce plugin utilise les endpoints Google Cloud Code Assist (`cloudcode-pa.googleapis.com`) via **l'OAuth Antigravity**, en dehors du client officiel Antigravity CLI. **Cela constitue une violation des Conditions d'Utilisation d'Antigravity de Google.** Les conditions sont explicites :
-
-> « Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for **suspension or termination of your Antigravity and/or Gemini CLI accounts**. »
-
-Ce n'est **pas théorique**. Google a mené des vagues d'application actives désactivant les comptes qui accèdent à Antigravity via des clients OAuth tiers. Les bans coupent aussi l'accès à **Gemini CLI et Gemini Code Assist** sur le même compte, et une seconde infraction entraîne un ban **permanent**. Un compte Google personnel peut porter des services sans rapport auxquels vous tenez.
-
-**L'alternative conforme :** utilisez une **clé API Gemini AI Studio / Google AI Studio** (facturation à l'usage) avec un provider Gemini, au lieu de l'OAuth Antigravity. Les conditions n'interdisent que l'usage détourné de l'OAuth d'*abonnement* ; une clé API facturée au token est le chemin supporté.
-
-`hermes auth add antigravity` affiche cet avertissement avant de démarrer le flux OAuth. Si vous poursuivez, vous acceptez le risque pour votre compte.
-
-### Transport TLS (surface de détection)
+## Transport TLS (surface de détection)
 
 Le client officiel `agy` est un binaire **Go** ; ce plugin parle TLS via la stdlib Python `ssl`/OpenSSL avec un handshake par défaut. Leur ClientHello TLS (donc leur empreinte JA3) diffère, et cet écart est **assumé tel quel** : mesuré le 2026-10-14, le relais répond 200 avec le handshake par défaut, donc le tuning d'empreinte a été retiré (pas de mimicry sans besoin mesuré). L'écart stdlib-vs-Go reste documenté dans `UPSTREAM_DRIFT.md` et mesuré par `tools/transport_check.py`. Cela **ne rend pas** l'intégration conforme aux ToS.
 
