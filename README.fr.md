@@ -146,6 +146,8 @@ hermes model
 Choisissez **Google Antigravity**. Si vous n'êtes pas encore connecté, Hermes lance automatiquement le flux interactif Google OAuth 2.0 PKCE dans votre terminal.
 
 ### 2. Commande autonome de connexion
+`hermes auth add antigravity` et la connexion interactive autonome affichent tous deux
+l'avertissement sur les conditions avant de démarrer OAuth. La connexion non interactive est refusée.
 Vous pouvez également vous authentifier ou vérifier le statut à tout moment :
 ```bash
 # Vérifier le statut

@@ -146,6 +146,8 @@ hermes model
 Select **Google Antigravity**. If not already authenticated, Hermes launches the interactive Google OAuth 2.0 PKCE flow directly in your terminal.
 
 ### 2. Standalone Authentication CLI
+Both `hermes auth add antigravity` and the standalone interactive login display the
+terms warning before starting OAuth. Non-interactive login is refused.
 Authenticate or inspect status at any time:
 ```bash
 # Check status
